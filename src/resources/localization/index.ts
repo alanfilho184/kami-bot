@@ -17,9 +17,7 @@ const translationFiles = globSync(searchPatterns);
 translationFiles.forEach(translationPathString => {
     const normalizedPath = translationPathString.replace(/\\/g, '/');
     try {
-        const translation: { [key: string]: string } = JSON.parse(
-            fs.readFileSync(normalizedPath, 'utf-8')
-        );
+        const translation: { [key: string]: string } = JSON.parse(fs.readFileSync(normalizedPath, 'utf-8'));
 
         const langKey = `${translation['language']}`.toLowerCase().replace('_', '-');
         languages[langKey] = { ...languages[langKey], ...translation };

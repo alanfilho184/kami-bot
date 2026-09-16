@@ -31,7 +31,14 @@ const config: EnvVars = {
     BOT_STATUS_CHANNEL_ID: new Channel_Id(process.env.BOT_STATUS_CHANNEL_ID as string),
     BOT_STATUS_MESSAGE_ID: new Msg_Id(process.env.BOT_STATUS_MESSAGE_ID as string),
     EMBED_COLOR: process.env.EMBED_COLOR as string,
-    VERSION: packageJson.version || (process.env.version as string)
+    VERSION: packageJson.version || (process.env.version as string),
+    API_TOKEN: process.env.API_TOKEN as string,
+    INSTANCE_TYPE: process.env.INSTANCE_TYPE as 'primary' | 'backup'
 };
+
+if (config.INSTANCE_TYPE === 'backup') {
+    config.PRIMARY_INSTANCE_STATUS_URL = process.env.PRIMARY_INSTANCE_STATUS_URL as string;
+    config.PRIMARY_API_TOKEN = process.env.PRIMARY_API_TOKEN as string;
+}
 
 export default config;

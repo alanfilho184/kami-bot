@@ -3,8 +3,7 @@
 # Kami
 
 ![Version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Falanfilho184%2Fkami-bot%2Frefs%2Fheads%2Fmain%2Fpackage.json&query=version&logo=https%3A%2F%2Fkamiapp.com.br%2Fassets%2Fimg%2Flogo.webp&label=version&color=%230082FF)
- ![License](https://img.shields.io/badge/license-CC%20BY--NC--ND%204.0-blue?color=%230082FF)
-
+![License](https://img.shields.io/badge/license-CC%20BY--NC--ND%204.0-blue?color=%230082FF)
 
 **[🌐 Site](https://kamiapp.com.br)** · **[🤖 Convite](https://kamiapp.com.br/convite)** · **[🐛 Issues](https://github.com/alanfilho184/kami-bot/issues)**
 
@@ -34,10 +33,11 @@ O projeto ganhou um novo foco: o desenvolvimento de novas funcionalidades passa 
 
 ## Multi-idioma
 
-O projeto está disponível em ***PT-BR*** (idioma padrão) e ***EN-US***. O idioma pode ser alterado utilizando `/config`.
+O projeto está disponível em _**PT-BR**_ (idioma padrão) e _**EN-US**_. O idioma pode ser alterado utilizando `/config`.
 
 ## Multi-language
-The project is available in ***PT-BR*** (default language) and ***EN-US***. The language can be changed using `/config`.
+
+The project is available in _**PT-BR**_ (default language) and _**EN-US**_. The language can be changed using `/config`.
 
 ## Site
 

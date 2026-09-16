@@ -28,6 +28,10 @@ declare global {
         BOT_STATUS_MESSAGE_ID: Msg_Id;
         EMBED_COLOR: string;
         VERSION: string;
+        API_TOKEN: string;
+        INSTANCE_TYPE: 'primary' | 'backup';
+        PRIMARY_INSTANCE_STATUS_URL?: string;
+        PRIMARY_API_TOKEN?: string;
     };
 
     interface Logger {
@@ -335,7 +339,7 @@ declare global {
                 is_premium: boolean;
             };
             interaction: Interaction;
-            rawBody: Buffer
+            rawBody: Buffer;
         }
     }
 

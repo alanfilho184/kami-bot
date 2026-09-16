@@ -10,9 +10,6 @@ import commandsStatistics from '../../resources/utils/command-statistics';
 import { Command_Category } from '../../types/enums';
 import botStatus from '../../modules/bot-status';
 
-import rest from '../../configs/rest';
-import { Routes } from 'discord-api-types/v10';
-
 export default {
     ownerOnly: false,
     commandNames: {
@@ -36,7 +33,7 @@ export default {
         botInfoEmbed.setColor(parseInt(config.EMBED_COLOR));
         botInfoEmbed.setTitle(localization(language, 'bot-info|title'));
 
-        const stats = botStatus.getProcessStats();
+        const stats = botStatus!.getProcessStats();
 
         const cpuUsage = stats.cpu;
         const memoryUsage = stats.memory.toFixed(2);

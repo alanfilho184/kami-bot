@@ -1,0 +1,357 @@
+import nacl from 'tweetnacl';
+import request from 'supertest';
+import { InteractionType } from 'discord-interactions';
+import type { Application } from 'express';
+import { waitForCall } from './mock-factories';
+
+// =============================================================================
+// Factory de payloads de interação do Discord para testes.
+//
+// - Gera payloads válidos de APPLICATION_COMMAND, MESSAGE_COMPONENT,
+//   MODAL_SUBMIT, APPLICATION_COMMAND_AUTOCOMPLETE e PING;
+// - Assina o payload EXATAMENTE como o Discord faz
+//   (ED25519 sobre `timestamp + body`, em hex);
+// - Envia a requisição assinada via supertest.
+//
+// O par de chaves é criado em test/helpers/setup.ts (setupFiles).
+// =============================================================================
+
+type TestKeyPair = { publicKey: Uint8Array; secretKey: Uint8Array };
+
+function getTestKeyPair(): TestKeyPair {
+    return (globalThis as Record<string, unknown>).__TEST_KEY_PAIR__ as TestKeyPair;
+}
+
+const DISCORD_EPOCH = 1420070400000;
+
+/** Gera um snowflake plausível (string numérica) para ids de interação. */
+export function snowflake(date: Date = new Date()): string {
+    return ((BigInt(date.getTime() - DISCORD_EPOCH) << 22n) | 42n).toString();
+}
+
+/**
+ * Assina o corpo da requisição exatamente como o Discord:
+ * signature = ED25519(`timestamp + body`), em hex.
+ */
+export function sign(body: string, timestamp: string): string {
+    // Uint8Array.toString('hex') NÃO gera hex — converter via Buffer.
+    return Buffer.from(nacl.sign.detached(Buffer.from(timestamp + body), getTestKeyPair().secretKey)).toString('hex');
+}
+
+// ---------------------------------------------------------------------------
+// Tipos dos payloads
+// ---------------------------------------------------------------------------
+
+export interface CommandOption {
+    name: string;
+    type: number; // 3 = STRING, 4 = INTEGER ...
+    value: string;
+    focused?: boolean;
+}
+
+export interface InteractionPayload {
+    id: string;
+    application_id: string;
+    type: number;
+    token: string;
+    version: number;
+    channel_id?: string;
+    locale?: string;
+    guild_locale?: string;
+    guild_id?: string;
+    guild?: Record<string, unknown>;
+    channel?: Record<string, unknown>;
+    app_permissions?: string;
+    member?: Record<string, unknown>;
+    user?: Record<string, unknown>;
+    message?: Record<string, unknown>;
+    // PING não tem `data` (o Discord omite) — demais tipos sempre enviam.
+    data?: {
+        id?: string;
+        name?: string;
+        type?: number;
+        options?: CommandOption[];
+        component_type?: number;
+        custom_id?: string;
+        values?: string[];
+    };
+}
+
+interface IdentityOptions {
+    applicationId?: string;
+    guildId?: string;
+    channelId?: string;
+    userId?: string;
+    userName?: string;
+    globalName?: string;
+    locale?: string;
+    token?: string;
+    inDM?: boolean;
+}
+
+const defaults: IdentityOptions & {
+    applicationId: string;
+    guildId: string;
+    channelId: string;
+    userId: string;
+    userName: string;
+    globalName: string;
+    locale: string;
+} = {
+    applicationId: process.env.CLIENT_ID ?? '111111111111111111',
+    guildId: '333333333333333333',
+    channelId: '444444444444444444',
+    userId: '222222222222222222',
+    userName: 'tester',
+    globalName: 'Tester',
+    locale: 'pt-BR'
+};
+
+function discordUser(opts: IdentityOptions) {
+    return {
+        id: opts.userId ?? defaults.userId,
+        username: opts.userName ?? defaults.userName,
+        global_name: opts.globalName ?? defaults.globalName,
+        discriminator: '0001',
+        avatar: 'default-avatar.png',
+        public_flags: 0,
+        bot: false
+    };
+}
+
+function withGuild(opts: IdentityOptions, payload: InteractionPayload): InteractionPayload {
+    const guildId = opts.guildId ?? defaults.guildId;
+    payload.guild_id = guildId;
+    payload.guild = {
+        id: guildId,
+        locale: opts.locale ?? defaults.locale,
+        features: []
+    };
+    payload.channel = { id: opts.channelId ?? defaults.channelId, type: 0 };
+    payload.app_permissions = '0';
+    payload.member = { roles: [], user: discordUser(opts) };
+    return payload;
+}
+
+// ---------------------------------------------------------------------------
+// Builders
+// ---------------------------------------------------------------------------
+
+export interface CommandInteractionOptions extends IdentityOptions {
+    name: string;
+    options?: CommandOption[];
+}
+
+/** Interação de APPLICATION_COMMAND (/comando). */
+export function buildCommandInteraction(opts: CommandInteractionOptions): InteractionPayload {
+    const payload: InteractionPayload = {
+        id: snowflake(),
+        application_id: opts.applicationId ?? defaults.applicationId,
+        type: InteractionType.APPLICATION_COMMAND,
+        token: opts.token ?? snowflake(),
+        version: 1,
+        channel_id: opts.channelId ?? defaults.channelId,
+        locale: opts.locale ?? defaults.locale,
+        guild_locale: opts.locale ?? defaults.locale,
+        data: {
+            id: snowflake(),
+            name: opts.name,
+            type: 1,
+            options: opts.options ?? []
+        }
+    };
+
+    if (opts.inDM) {
+        payload.user = discordUser(opts);
+        return payload;
+    }
+
+    return withGuild(opts, payload);
+}
+
+export interface ComponentInteractionOptions extends IdentityOptions {
+    /** Ex.: 'roll-again|1d20' (nome|args) */
+    componentId: string;
+}
+
+/** Interação de MESSAGE_COMPONENT (botão etc.). */
+export function buildComponentInteraction(opts: ComponentInteractionOptions): InteractionPayload {
+    const payload: InteractionPayload = {
+        id: snowflake(),
+        application_id: opts.applicationId ?? defaults.applicationId,
+        type: InteractionType.MESSAGE_COMPONENT,
+        token: opts.token ?? snowflake(),
+        version: 1,
+        channel_id: opts.channelId ?? defaults.channelId,
+        locale: opts.locale ?? defaults.locale,
+        guild_locale: opts.locale ?? defaults.locale,
+        data: {
+            component_type: 2,
+            custom_id: opts.componentId
+        },
+        message: { id: snowflake() }
+    };
+
+    if (opts.inDM) {
+        payload.user = discordUser(opts);
+        return payload;
+    }
+
+    return withGuild(opts, payload);
+}
+
+export interface ModalInteractionOptions extends IdentityOptions {
+    customId: string;
+    values?: string[];
+}
+
+/** Interação de MODAL_SUBMIT. */
+export function buildModalInteraction(opts: ModalInteractionOptions): InteractionPayload {
+    const payload: InteractionPayload = {
+        id: snowflake(),
+        application_id: opts.applicationId ?? defaults.applicationId,
+        type: InteractionType.MODAL_SUBMIT,
+        token: opts.token ?? snowflake(),
+        version: 1,
+        channel_id: opts.channelId ?? defaults.channelId,
+        locale: opts.locale ?? defaults.locale,
+        guild_locale: opts.locale ?? defaults.locale,
+        data: {
+            id: snowflake(),
+            custom_id: opts.customId,
+            type: 5,
+            values: opts.values ?? []
+        },
+        message: { id: snowflake() }
+    };
+
+    if (opts.inDM) {
+        payload.user = discordUser(opts);
+        return payload;
+    }
+
+    return withGuild(opts, payload);
+}
+
+export interface AutocompleteInteractionOptions extends IdentityOptions {
+    name: string;
+    focusedOption: CommandOption;
+    /** Opções já preenchidas (não-focadas) que o handler lê — ex. sheet_name ao focar section. */
+    options?: CommandOption[];
+}
+
+/** Interação de APPLICATION_COMMAND_AUTOCOMPLETE. */
+export function buildAutocompleteInteraction(opts: AutocompleteInteractionOptions): InteractionPayload {
+    const payload: InteractionPayload = {
+        id: snowflake(),
+        application_id: opts.applicationId ?? defaults.applicationId,
+        type: InteractionType.APPLICATION_COMMAND_AUTOCOMPLETE,
+        token: opts.token ?? snowflake(),
+        version: 1,
+        channel_id: opts.channelId ?? defaults.channelId,
+        locale: opts.locale ?? defaults.locale,
+        guild_locale: opts.locale ?? defaults.locale,
+        data: {
+            id: snowflake(),
+            name: opts.name,
+            type: 1,
+            options: [{ ...opts.focusedOption, focused: true }, ...(opts.options ?? [])]
+        }
+    };
+
+    if (opts.inDM) {
+        payload.user = discordUser(opts);
+        return payload;
+    }
+
+    return withGuild(opts, payload);
+}
+
+/** Interação de PING (o bot responde PONG). Inclui usuário/guild por padrão,
+ *  pois a rota chama loadUser() antes de checar o tipo. */
+export function buildPingInteraction(opts: IdentityOptions = {}): InteractionPayload {
+    const payload: InteractionPayload = {
+        id: snowflake(),
+        application_id: opts.applicationId ?? defaults.applicationId,
+        type: InteractionType.PING,
+        token: opts.token ?? snowflake(),
+        version: 1,
+        channel_id: opts.channelId ?? defaults.channelId,
+        locale: opts.locale ?? defaults.locale,
+        guild_locale: opts.locale ?? defaults.locale
+    };
+
+    if (opts.inDM) {
+        payload.user = discordUser(opts);
+        return payload;
+    }
+
+    return withGuild(opts, payload);
+}
+
+// ---------------------------------------------------------------------------
+// Envio
+// ---------------------------------------------------------------------------
+
+export interface SignedRequestOverrides {
+    /** Para testar assinaturas inválidas/adulteradas. */
+    signature?: string;
+    timestamp?: string;
+}
+
+/**
+ * Envia a interação assinada para POST /interactions.
+ * O corpo é serializado exatamente como assinado (sem reformatação).
+ */
+export function postSignedInteraction(
+    app: Application,
+    payload: InteractionPayload,
+    overrides: SignedRequestOverrides = {}
+) {
+    const body = JSON.stringify(payload);
+    const timestamp = overrides.timestamp ?? Math.floor(Date.now() / 1000).toString();
+    const signature = overrides.signature ?? sign(body, timestamp);
+
+    return request(app)
+        .post('/interactions')
+        .set('x-signature-ed25519', signature)
+        .set('x-signature-timestamp', timestamp)
+        .set('Content-Type', 'application/json')
+        .send(body);
+}
+
+/**
+ * Envia um comando/componente e aguarda o `reply` (rest.patch no webhook).
+ *
+ * Motivo: a rota responde o acknowledge (HTTP 200) ANTES de executar o
+ * comando; sem espera, asserções sobre o reply perdem a corrida sempre que
+ * o comando faz I/O real (bcrypt) ou o worker está sob carga (coverage).
+ * Todo fluxo de comando/componente termina em `int.reply()` (sucesso ou
+ * erro), então aguardar +1 chamada de patch é determinístico.
+ *
+ * NÃO usar para PING, AUTOCOMPLETE ou 401 (respondem via res.json direta).
+ */
+export async function postCommandAndWaitReply(
+    app: Application,
+    payload: InteractionPayload,
+    overrides: SignedRequestOverrides = {}
+) {
+    // O mock em test/mocks/rest.ts vale para este import
+    // dinâmico também, pois resolve para o mesmo módulo.
+    const restMock = (await import('../../src/configs/rest')).default as unknown as {
+        patch: jest.Mock;
+    };
+    const callsBefore = restMock.patch.mock.calls.length;
+    const res = await postSignedInteraction(app, payload, overrides);
+    await waitForCall(restMock.patch, callsBefore + 1);
+    return res;
+}
+
+/**
+ * Aguarda o app estar pronto: importa o `ready` exportado por src/app
+ * (loadCache) em vez de um timeout arbitrário que causa race.
+ */
+export async function waitAppReady(): Promise<void> {
+    const mod = await import('../../src/app');
+    await (mod as { ready?: Promise<void> }).ready;
+}

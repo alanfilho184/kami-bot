@@ -104,12 +104,13 @@ export default {
 
             const insanitys: string[] = [];
             if (roll.results[0] == 1) {
-                let positionRoll = diceRoller(`3d${temporaryInsanities.length}`);
+                const positionRoll = deDuplicateRolls(
+                    diceRoller(`3d${temporaryInsanities.length}`).results,
+                    temporaryInsanities.length
+                );
 
-                positionRoll = deDuplicateRolls(positionRoll.results, temporaryInsanities.length);
-
-                for (let i = 1; i < 4; i++) {
-                    insanitys.push(temporaryInsanities[positionRoll.results[i] - 1]);
+                for (let i = 0; i < 3; i++) {
+                    insanitys.push(temporaryInsanities[positionRoll[i] - 1]);
                 }
 
                 insanityEmbed.setDescription(
@@ -120,12 +121,13 @@ export default {
                     ])
                 );
             } else if (roll.results[0] == 2) {
-                let positionRoll = diceRoller(`2d${temporaryInsanities.length}`);
+                const positionRoll = deDuplicateRolls(
+                    diceRoller(`2d${temporaryInsanities.length}`).results,
+                    temporaryInsanities.length
+                );
 
-                positionRoll = deDuplicateRolls(positionRoll.results, temporaryInsanities.length);
-
-                for (let i = 1; i < 3; i++) {
-                    insanitys.push(temporaryInsanities[roll.results[i] - 1]);
+                for (let i = 0; i < 2; i++) {
+                    insanitys.push(temporaryInsanities[positionRoll[i] - 1]);
                 }
 
                 insanityEmbed.setDescription(

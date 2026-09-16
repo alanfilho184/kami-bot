@@ -17,23 +17,55 @@ class BotStatus {
     statusChannelId: string | null = null;
     dbData: any = null;
     discordData: any = null;
-    constructor() {
-        this.getDbData();
-        setInterval(() => {
-            this.getDbData();
-        }, ms('10m'));
+    private timers: NodeJS.Timeout[] = [];
+    private enabled: boolean = false;
 
-        this.getDiscordData();
-        setInterval(() => {
-            this.getDiscordData();
-        }, ms('1h'));
+    get isActive(): boolean {
+        return this.enabled;
+    }
 
-        setTimeout(() => {
-            this.updateStatusMessage();
+    enable(): void {
+        if (this.enabled) {
+            return;
+        }
+
+        this.enabled = true;
+
+        void this.getDbData();
+        this.timers.push(
             setInterval(() => {
-                this.updateStatusMessage();
-            }, ms('1m'));
-        }, ms('1m'));
+                void this.getDbData();
+            }, ms('10m'))
+        );
+
+        void this.getDiscordData();
+        this.timers.push(
+            setInterval(() => {
+                void this.getDiscordData();
+            }, ms('1h'))
+        );
+
+        this.timers.push(
+            setTimeout(() => {
+                void this.updateStatusMessage();
+                this.timers.push(
+                    setInterval(() => {
+                        void this.updateStatusMessage();
+                    }, ms('1m'))
+                );
+            }, ms('1m'))
+        );
+    }
+
+    disable(): void {
+        this.enabled = false;
+
+        for (const timer of this.timers) {
+            clearInterval(timer);
+            clearTimeout(timer);
+        }
+
+        this.timers = [];
     }
 
     private lastCpuUsage: NodeJS.CpuUsage = process.cpuUsage();
@@ -189,7 +221,6 @@ class BotStatus {
             (hours > 0 ? (hours == 1 ? hours + ' hora ' : hours + ' horas ') : '') +
             (minutes > 0 ? (minutes == 1 ? minutes + ' minuto ' : minutes + ' minutos ') : '');
 
-
         const stats = this.getProcessStats();
         const ram = stats.memory.toFixed(2);
         const cpu = stats.cpu;
@@ -288,6 +319,7 @@ class BotStatus {
     }
 
     async updateStatusMessage() {
+        if (!this.enabled) return;
         if (!config.BOT_STATUS_CHANNEL_ID || !config.BOT_STATUS_MESSAGE_ID) {
             console.warn('Bot status channel ID or message ID not configured. Skipping status update.');
             return;
@@ -335,5 +367,9 @@ class BotStatus {
 }
 
 const botStatus = new BotStatus();
+
+if (process.env.NODE_ENV !== 'test' && config.INSTANCE_TYPE === 'primary') {
+    botStatus.enable();
+}
 
 export default botStatus;

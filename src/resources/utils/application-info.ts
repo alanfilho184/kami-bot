@@ -31,17 +31,29 @@ async function getApplicationInfo() {
     return applicationInfo;
 }
 
-getApplicationInfo().then(info => {
-    // @ts-ignore
-    applicationInfo = info;
-});
-
-setInterval(
-    async () => {
+getApplicationInfo()
+    .then(info => {
         // @ts-ignore
-        applicationInfo = await getApplicationInfo();
-    },
-    1000 * 60 * 60 * 12
-);
+        applicationInfo = info;
+    })
+    .catch(() => {
+        // Em testes ou sem rede, mantém applicationInfo indefinido sem derrubar o import.
+    });
 
-export { applicationInfo };
+if (process.env.NODE_ENV !== 'test') {
+    const interval = setInterval(
+        async () => {
+            try {
+                // @ts-ignore
+                applicationInfo = await getApplicationInfo();
+            } catch {
+                // ignora falhas periódicas de rede
+            }
+        },
+        1000 * 60 * 60 * 12
+    );
+    // Não segura o processo aberto (importante p/ testes com --detectOpenHandles).
+    (interval as unknown as { unref?: () => void }).unref?.();
+}
+
+export { applicationInfo, getApplicationInfo };

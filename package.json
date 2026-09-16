@@ -1,12 +1,15 @@
 {
     "name": "kami-bot-http",
-    "version": "5.0.6",
+    "version": "5.1.0",
     "main": "server.js",
     "scripts": {
         "start": "node dist/app.js",
         "format": "npx prettier --write .",
+        "test": "jest -w 16 --forceExit",
+        "test:coverage": "jest -w 16 --forceExit --coverage",
         "build": "tsc",
-        "build-start": "npm run build && npm run start"
+        "build-start": "npm run build && npm run start",
+        "build-test": "npm run build && npm run test"
     },
     "keywords": [
         "rpg",
@@ -43,10 +46,15 @@
         "tweetnacl": "^1.0.3"
     },
     "devDependencies": {
+        "@swc/core": "^1.13.5",
+        "@swc/jest": "^0.2.39",
         "@types/express": "^5.0.6",
+        "@types/jest": "^30.0.0",
         "@types/luxon": "^3.4.2",
         "@types/ms": "^0.7.34",
         "@types/node": "^22.9.0",
+        "jest": "^30.5.1",
+        "supertest": "^7.2.2",
         "typescript": "^7.0.2"
     }
 }

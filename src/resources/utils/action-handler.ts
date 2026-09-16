@@ -6,12 +6,14 @@ class ActionHandler {
         { createdAt: Date; expireAt: Date; singleUse: boolean; respondOnlyToUserId?: string; run: Function }
     > = new Map();
     constructor() {
-        setInterval(
+        const interval = setInterval(
             () => {
                 this.clearExpiredActions();
             },
             10 * 60 * 1000
         );
+        // Não segura o processo aberto (importante p/ o Jest encerrar limpo).
+        (interval as unknown as { unref?: () => void }).unref?.();
     }
 
     registerAction(

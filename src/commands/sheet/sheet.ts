@@ -464,7 +464,10 @@ export default {
                 );
 
                 if (!sheet) {
-                    if (int.getArgs().get('component_type') && int.getArgs().get('component_type').value == Attribute_Type.LIST) {
+                    if (
+                        int.getArgs().get('component_type') &&
+                        int.getArgs().get('component_type').value == Attribute_Type.LIST
+                    ) {
                         let value = int.getArgs().get('value').value;
 
                         if (value.trim() == '') {
@@ -544,7 +547,10 @@ export default {
                         ?.attributes.find(a => a.name === int.getArgs().get('attribute').value);
 
                     if (!focusedAttribute) {
-                        if (int.getArgs().get('component_type') && int.getArgs().get('component_type').value == Attribute_Type.LIST) {
+                        if (
+                            int.getArgs().get('component_type') &&
+                            int.getArgs().get('component_type').value == Attribute_Type.LIST
+                        ) {
                             let value = int.getArgs().get('value').value;
 
                             if (value.trim() == '') {
