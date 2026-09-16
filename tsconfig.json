@@ -96,7 +96,4 @@
         "skipLibCheck": true /* Skip checking lib files. */
     },
     "include": ["src"] /* Only src is compiled; test/ (inclui test/mocks) fica fora do tsc. */,
-    "references": [
-        { "path": "./tsconfig.test.json" }
-    ] /* Editor (VSCode): faz o TS Server carregar tsconfig.test.json para test/. Ignorado pelo `tsc` normal do build. */
 }

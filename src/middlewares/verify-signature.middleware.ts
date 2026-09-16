@@ -29,10 +29,10 @@ export default function verifySignature(req: Request, res: Response, next: NextF
             if (req.headers.authorization === config.API_TOKEN) {
                 next();
             } else {
-                res.status(403).end();
+                res.status(403).send({ error: 'Rota não disponível para o público' });
             }
         } else {
-            res.status(403).end();
+            res.status(403).send({ error: 'Rota não disponível para o público' });
         }
     }
 }

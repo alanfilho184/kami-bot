@@ -4,7 +4,7 @@ module.exports = {
     },
     testEnvironment: 'node',
     roots: ['<rootDir>/test'],
-    setupFiles: ['<rootDir>/test/helpers/setup.ts'],
+    setupFiles: ['<rootDir>/test/helpers/setup.js'],
     testTimeout: 20000,
     // Limpa chamadas entre testes sem apagar implementações (mockClear, não mockReset).
     clearMocks: true,
