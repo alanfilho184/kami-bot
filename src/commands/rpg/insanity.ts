@@ -4,7 +4,7 @@ import { Interaction } from '../../resources/utils/interaction-handler';
 import { localization } from '../../resources/localization';
 import config from '../../configs/config';
 import { diceRoller } from '../../resources/utils/dice-roller';
-import { Command_Category } from '../../types/enums';
+import { Command_Category, Available_Languages } from '../../types/enums';
 
 function deDuplicateRolls(rolls: number[], diceSize: number): number[] {
     const uniqueRolls = new Set<number>();
@@ -90,9 +90,16 @@ export default {
             insanityEmbed.setTitle(localization(language, 'insanity|temporary-title'));
 
             const temporaryInsanities = (
-                await db.resources.findUnique({
+                await db.resources.findFirst({
                     where: {
-                        name: 'temporary_insanity'
+                        AND: [
+                            {
+                                name: 'temporary_insanity'
+                            },
+                            {
+                                language: language == Available_Languages['pt-br'] ? 'PT_BR' : 'EN_US'
+                            }
+                        ]
                     },
                     select: {
                         data: true
@@ -147,9 +154,16 @@ export default {
             insanityEmbed.setTitle(localization(language, 'insanity|permanent-title'));
 
             const permanentInsanities = (
-                await db.resources.findUnique({
+                await db.resources.findFirst({
                     where: {
-                        name: 'permanent_insanity'
+                        AND: [
+                            {
+                                name: 'permanent_insanity'
+                            },
+                            {
+                                language: language == Available_Languages['pt-br'] ? 'PT_BR' : 'EN_US'
+                            }
+                        ]
                     },
                     select: {
                         data: true

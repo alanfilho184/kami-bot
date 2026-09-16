@@ -163,9 +163,11 @@ model tutorials {
 
 model resources {
     id       Int                  @id @default(autoincrement())
-    name     String               @unique
+    name     String
     data     Json
     language Available_Languages?
+
+    @@unique([name, language])
 }
 
 model announcement {
