@@ -38,7 +38,7 @@ const config: EnvVars = {
 
 if (config.INSTANCE_TYPE === 'backup') {
     config.PRIMARY_INSTANCE_STATUS_URL = process.env.PRIMARY_INSTANCE_STATUS_URL as string;
-    config.PRIMARY_API_TOKEN = process.env.PRIMARY_API_TOKEN as string;
+    config.PRIMARY_INSTANCE_API_TOKEN = process.env.PRIMARY_API_TOKEN as string;
 }
 
 export default config;

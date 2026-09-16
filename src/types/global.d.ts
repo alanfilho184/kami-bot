@@ -31,7 +31,7 @@ declare global {
         API_TOKEN: string;
         INSTANCE_TYPE: 'primary' | 'backup';
         PRIMARY_INSTANCE_STATUS_URL?: string;
-        PRIMARY_API_TOKEN?: string;
+        PRIMARY_INSTANCE_API_TOKEN?: string;
     };
 
     interface Logger {

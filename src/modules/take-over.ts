@@ -28,7 +28,7 @@ class TakeOver {
             const res = await fetch(config.PRIMARY_INSTANCE_STATUS_URL!, {
                 method: 'GET',
                 headers: {
-                    Authorization: config.PRIMARY_API_TOKEN!
+                    Authorization: config.PRIMARY_INSTANCE_API_TOKEN!
                 }
             });
 
