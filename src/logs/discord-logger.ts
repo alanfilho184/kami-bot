@@ -32,7 +32,7 @@ async function sendLogWebhook(content: string | EmbedBuilder | EmbedBuilder[], p
 async function sendStartupWebhook() {
     const content = new EmbedBuilder()
         .setColor(parseInt(config.EMBED_COLOR))
-        .setTitle('App started')
+        .setTitle(`${config.INSTANCE_TYPE} instance started`)
         .setFooter({
             text: `Kami v${config.VERSION} | ${DateTime.now()
                 .setZone('America/Sao_Paulo')

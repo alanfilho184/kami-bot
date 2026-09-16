@@ -47,8 +47,6 @@ class TakeOver {
             return;
         }
 
-        // Trava de reentrância: se já há uma verificação em andamento
-        // (inclusive dentro do loop de retry), o tick do setInterval é ignorado.
         if (this.isChecking) {
             return;
         }
