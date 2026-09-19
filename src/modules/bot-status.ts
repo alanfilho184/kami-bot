@@ -100,6 +100,32 @@ class BotStatus {
                                 WHEN action_type = 'COMPONENT' AND timestamp >= NOW() - INTERVAL '24 hours' THEN 1 
                                 END) AS total_components_24h,
                             COUNT(CASE 
+                                WHEN action_type = 'COMMAND'
+                                AND timestamp >= NOW() - INTERVAL '48 hours'
+                                AND timestamp < NOW() - INTERVAL '24 hours' THEN 1
+                                END) AS total_commands_prev_24h,
+                            COUNT(CASE 
+                                WHEN action_type = 'COMPONENT'
+                                AND timestamp >= NOW() - INTERVAL '48 hours'
+                                AND timestamp < NOW() - INTERVAL '24 hours' THEN 1
+                                END) AS total_components_prev_24h,
+                            COUNT(CASE 
+                                WHEN action_type = 'COMMAND' AND timestamp >= NOW() - INTERVAL '7 days' THEN 1 
+                                END) AS total_commands_7d,
+                            COUNT(CASE 
+                                WHEN action_type = 'COMPONENT' AND timestamp >= NOW() - INTERVAL '7 days' THEN 1 
+                                END) AS total_components_7d,
+                            COUNT(CASE 
+                                WHEN action_type = 'COMMAND'
+                                AND timestamp >= NOW() - INTERVAL '14 days'
+                                AND timestamp < NOW() - INTERVAL '7 days' THEN 1
+                                END) AS total_commands_prev_7d,
+                            COUNT(CASE 
+                                WHEN action_type = 'COMPONENT'
+                                AND timestamp >= NOW() - INTERVAL '14 days'
+                                AND timestamp < NOW() - INTERVAL '7 days' THEN 1
+                                END) AS total_components_prev_7d,
+                            COUNT(CASE 
                                 WHEN action_type = 'COMMAND' AND timestamp >= NOW() - INTERVAL '30 days' THEN 1 
                                 END) AS total_commands_30d,
                             COUNT(CASE 
@@ -150,6 +176,12 @@ class BotStatus {
                         t.total_components AS total_components,
                         l.total_commands_24h AS total_commands_today,
                         l.total_components_24h AS total_components_today,
+                        l.total_commands_prev_24h AS total_commands_prev_day,
+                        l.total_components_prev_24h AS total_components_prev_day,
+                        l.total_commands_7d AS total_commands_week,
+                        l.total_components_7d AS total_components_week,
+                        l.total_commands_prev_7d AS total_commands_prev_week,
+                        l.total_components_prev_7d AS total_components_prev_week,
                         l.total_commands_30d AS total_commands_month,
                         l.total_components_30d AS total_components_month,
                         
@@ -168,6 +200,12 @@ class BotStatus {
                 total_components: number;
                 total_commands_today: number;
                 total_components_today: number;
+                total_commands_prev_day: number;
+                total_components_prev_day: number;
+                total_commands_week: number;
+                total_components_week: number;
+                total_commands_prev_week: number;
+                total_components_prev_week: number;
                 total_commands_month: number;
                 total_components_month: number;
                 total_commands_prev_month: number;
@@ -177,17 +215,23 @@ class BotStatus {
         let pingEnd = Date.now();
 
         this.dbData = {
-            totalUsers: data.total_users,
-            totalActiveUsers: data.total_active_users,
-            totalSheetsCreated: data.total_sheets_created,
+            totalUsers: Number(data.total_users),
+            totalActiveUsers: Number(data.total_active_users),
+            totalSheetsCreated: Number(data.total_sheets_created),
             totalCommands: Number(data.total_commands) + 803_410, //O BOT antigo só mantinha contagem simples de comandos
             totalComponents: Number(data.total_components) + 120_647, //O BOT antigo só mantinha contagem simples de componentes
-            totalCommandsToday: data.total_commands_today,
-            totalComponentsToday: data.total_components_today,
-            totalCommandsMonth: data.total_commands_month,
-            totalComponentsMonth: data.total_components_month,
-            totalCommandsPrevMonth: data.total_commands_prev_month,
-            totalComponentsPrevMonth: data.total_components_prev_month,
+            totalCommandsToday: Number(data.total_commands_today),
+            totalComponentsToday: Number(data.total_components_today),
+            totalCommandsPrevDay: Number(data.total_commands_prev_day),
+            totalComponentsPrevDay: Number(data.total_components_prev_day),
+            totalCommandsWeek: Number(data.total_commands_week),
+            totalComponentsWeek: Number(data.total_components_week),
+            totalCommandsPrevWeek: Number(data.total_commands_prev_week),
+            totalComponentsPrevWeek: Number(data.total_components_prev_week),
+            totalCommandsMonth: Number(data.total_commands_month),
+            totalComponentsMonth: Number(data.total_components_month),
+            totalCommandsPrevMonth: Number(data.total_commands_prev_month),
+            totalComponentsPrevMonth: Number(data.total_components_prev_month),
             dbPing: pingEnd - pingStart
         };
     }
@@ -225,24 +269,30 @@ class BotStatus {
         const ram = stats.memory.toFixed(2);
         const cpu = stats.cpu;
 
-        const totalInteractionsMonth = parseInt(this.dbData?.totalCommandsMonth + this.dbData?.totalComponentsMonth);
-        const totalInteractionsPrevMonth = parseInt(
-            this.dbData?.totalCommandsPrevMonth + this.dbData?.totalComponentsPrevMonth
-        );
+        const totalInteractionsDay =
+            Number(this.dbData?.totalCommandsToday || 0) + Number(this.dbData?.totalComponentsToday || 0);
+        const totalInteractionsPrevDay =
+            Number(this.dbData?.totalCommandsPrevDay || 0) + Number(this.dbData?.totalComponentsPrevDay || 0);
+        const totalInteractionsWeek =
+            Number(this.dbData?.totalCommandsWeek || 0) + Number(this.dbData?.totalComponentsWeek || 0);
+        const totalInteractionsPrevWeek =
+            Number(this.dbData?.totalCommandsPrevWeek || 0) + Number(this.dbData?.totalComponentsPrevWeek || 0);
+        const totalInteractionsMonth =
+            Number(this.dbData?.totalCommandsMonth || 0) + Number(this.dbData?.totalComponentsMonth || 0);
+        const totalInteractionsPrevMonth =
+            Number(this.dbData?.totalCommandsPrevMonth || 0) + Number(this.dbData?.totalComponentsPrevMonth || 0);
 
-        let interactionsGrowth = totalInteractionsPrevMonth
-            ? ((totalInteractionsMonth - totalInteractionsPrevMonth) / totalInteractionsPrevMonth) * 100
-            : 'N/A';
+        const formatGrowth = (current: number, previous: number): string => {
+            if (!previous) return 'N/A';
+            const growth = ((current - previous) / previous) * 100;
+            if (growth == 0) return `→ 0.00 %`;
+            if (growth > 0) return `↑ ${growth.toFixed(2)} %`;
+            return `↓ ${Math.abs(growth).toFixed(2)} %`;
+        };
 
-        if (typeof interactionsGrowth != 'string') {
-            if (interactionsGrowth == 0) {
-                interactionsGrowth = `→ 0.00 %`;
-            } else if (interactionsGrowth > 0) {
-                interactionsGrowth = `↑ ${interactionsGrowth.toFixed(2)} %`;
-            } else {
-                interactionsGrowth = `↓ ${Math.abs(interactionsGrowth).toFixed(2)} %`;
-            }
-        }
+        const dailyGrowth = formatGrowth(totalInteractionsDay, totalInteractionsPrevDay);
+        const weeklyGrowth = formatGrowth(totalInteractionsWeek, totalInteractionsPrevWeek);
+        const interactionsGrowth = formatGrowth(totalInteractionsMonth, totalInteractionsPrevMonth);
 
         tableGeneral.addRow('Uso de CPU', `${cpu} %`);
         tableGeneral.addRow('Uso de RAM', `${ram} MB`);
@@ -269,13 +319,33 @@ class BotStatus {
         tableInteractions.setHeading('', 'Comandos', 'Componentes', 'Total');
         tableInteractions.addRow(' '.repeat(11), ' '.repeat(9), ' '.repeat(10), ' '.repeat(7));
         tableInteractions.addRow(
-            'Últimas 24 horas',
+            'Últimas 24h',
             `${this.dbData?.totalCommandsToday}`,
             `${this.dbData?.totalComponentsToday}`,
-            `${this.dbData?.totalCommandsToday + this.dbData?.totalComponentsToday}`
+            `${totalInteractionsDay}`
         );
         tableInteractions.addRow(
-            'Últimos 30 dias',
+            '24h Anteriores',
+            `${this.dbData?.totalCommandsPrevDay}`,
+            `${this.dbData?.totalComponentsPrevDay}`,
+            `${totalInteractionsPrevDay}`
+        );
+        tableInteractions.addRow(' '.repeat(11), ' '.repeat(9), ' '.repeat(10), ' '.repeat(7));
+        tableInteractions.addRow(
+            'Última Semana',
+            `${this.dbData?.totalCommandsWeek}`,
+            `${this.dbData?.totalComponentsWeek}`,
+            `${totalInteractionsWeek}`
+        );
+        tableInteractions.addRow(
+            'Semana Anterior',
+            `${this.dbData?.totalCommandsPrevWeek}`,
+            `${this.dbData?.totalComponentsPrevWeek}`,
+            `${totalInteractionsPrevWeek}`
+        );
+        tableInteractions.addRow(' '.repeat(11), ' '.repeat(9), ' '.repeat(10), ' '.repeat(7));
+        tableInteractions.addRow(
+            'Último Mês',
             `${this.dbData?.totalCommandsMonth}`,
             `${this.dbData?.totalComponentsMonth}`,
             `${totalInteractionsMonth}`
@@ -286,6 +356,7 @@ class BotStatus {
             `${this.dbData?.totalComponentsPrevMonth}`,
             `${totalInteractionsPrevMonth}`
         );
+        tableInteractions.addRow(' '.repeat(11), ' '.repeat(9), ' '.repeat(10), ' '.repeat(7));
         tableInteractions.addRow(
             'Desde o início',
             `${this.dbData?.totalCommands}`,
@@ -294,6 +365,8 @@ class BotStatus {
         );
 
         const tableFooter = new asciiTable();
+        tableFooter.addRow('Variação Diária', dailyGrowth);
+        tableFooter.addRow('Variação Semanal', weeklyGrowth);
         tableFooter.addRow('Variação Mensal', interactionsGrowth);
         tableFooter.addRow(' '.repeat(16), ' '.repeat(33));
         tableFooter.addRow('Versão do Kami', `v${config.VERSION}`);
