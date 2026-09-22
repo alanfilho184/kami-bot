@@ -319,7 +319,7 @@ class BotStatus {
         tableInteractions.setHeading('', 'Comandos', 'Componentes', 'Total');
         tableInteractions.addRow(' '.repeat(11), ' '.repeat(9), ' '.repeat(10), ' '.repeat(7));
         tableInteractions.addRow(
-            'Últimas 24h',
+            'Últimas 24 horas',
             `${this.dbData?.totalCommandsToday}`,
             `${this.dbData?.totalComponentsToday}`,
             `${totalInteractionsDay}`

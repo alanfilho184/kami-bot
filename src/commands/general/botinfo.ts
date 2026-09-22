@@ -77,8 +77,8 @@ export default {
             {
                 name: localization(language, 'bot-info|command-count'),
                 value: `\`${localization(language, 'bot-info|command-count-value', [
-                    { replace: '$slash$', value: totalTextCommands },
-                    { replace: '$button$', value: totalButtonCommands }
+                    { replace: '$slash$', value: totalTextCommands + 803_410 },
+                    { replace: '$button$', value: totalButtonCommands + 120_647 }
                 ])}\``,
                 inline: false
             },
@@ -105,12 +105,12 @@ export default {
         const supportButton = new ButtonBuilder()
             .setStyle(5)
             .setLabel(localization(language, 'bot-info|support-button'))
-            .setURL('https://kamicom.br/suporte');
+            .setURL('https://kamiapp.com.br/suporte');
 
         const inviteButton = new ButtonBuilder()
             .setStyle(5)
             .setLabel(localization(language, 'bot-info|invite-button'))
-            .setURL('https://kamicom.br/convite');
+            .setURL('https://kamiapp.com.br/convite');
 
         await int.reply({
             embeds: [botInfoEmbed],
