@@ -68,8 +68,14 @@ export default {
         } catch (error) {
             return int.reply({ content: localization(language, 'roll|invalid-dice') });
         }
+        
+        let diceResult;
 
-        const diceResult = diceRoller(dice);
+        try {
+            diceResult = diceRoller(dice);
+        } catch (err) {
+            return int.reply({ content: localization(language, 'roll|invalid-dice') });
+        }
 
         let diceEmbed = formatDiceEmbedOutput(diceResult);
 

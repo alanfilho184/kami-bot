@@ -27,6 +27,13 @@ beforeAll(async () => {
 beforeEach(() => {
     setupDefaultRestMocks(mockRest);
     setupDefaultDbMocks(mockDb);
+    mockDb.resources.findFirst.mockImplementation(async (args) => {
+        const name = args?.where?.AND?.[0]?.name;
+        if (name === 'permanent_insanity') {
+            return { data: ['Permanent Insanity A', 'Permanent Insanity B', 'Permanent Insanity C'] };
+        }
+        return { data: ['Temporary Insanity A', 'Temporary Insanity B', 'Temporary Insanity C'] };
+    });
 });
 
 describe('/insanity', () => {

@@ -22,7 +22,7 @@ const db = {
         create: jest.fn(),
         deleteMany: jest.fn()
     },
-    resources: { findUnique: jest.fn() },
+    resources: { findUnique: jest.fn(), findFirst: jest.fn() },
     announcement: { findMany: jest.fn() },
     announcements_seen: { findMany: jest.fn(), upsert: jest.fn() },
     $queryRaw: jest.fn(),

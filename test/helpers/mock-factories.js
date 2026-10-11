@@ -128,6 +128,7 @@ function setupDefaultDbMocks(mockDb, userOverrides = {}) {
     mockDb.irt_sheets.deleteMany.mockResolvedValue({ count: 0 });
 
     mockDb.resources.findUnique.mockResolvedValue({ data: ['Insanity A', 'Insanity B', 'Insanity C'] });
+    mockDb.resources.findFirst.mockResolvedValue({ data: ['Insanity A', 'Insanity B', 'Insanity C'] });
 
     mockDb.announcement.findMany.mockResolvedValue([]);
     mockDb.announcements_seen.findMany.mockResolvedValue([]);
