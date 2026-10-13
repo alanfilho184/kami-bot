@@ -149,6 +149,47 @@ const growthColor = (value: string): string => {
     return NERV.muted;
 };
 
+/**
+ * Largura estimada de um texto, em px de layout.
+ *
+ * Os fatores são propositalmente pessimistas (0.78 do tamanho da fonte para
+ * display e 0.63 para mono) e representam uma fonte condensada. Assim o layout
+ * continua correto mesmo se os TTF não forem encontrados no deploy e o render
+ * cair numa fonte do sistema mais larga.
+ */
+const measure = (content: string, size: number, tracking = 0, mono = false): number =>
+    Array.from(content).length * (size * (mono ? 0.68 : 0.82) + tracking);
+
+/**
+ * Reduz o texto até caber em maxWidth: primeiro diminui o corpo da fonte
+ * (até minSize) e só depois corta com reticências.
+ */
+const fitText = (
+    content: string,
+    maxWidth: number,
+    size: number,
+    tracking = 0,
+    mono = false,
+    minSize = 10
+): { text: string; size: number } => {
+    let currentSize = size;
+
+    while (currentSize > minSize && measure(content, currentSize, tracking, mono) > maxWidth) {
+        currentSize -= 0.5;
+    }
+
+    if (measure(content, currentSize, tracking, mono) <= maxWidth) {
+        return { text: content, size: currentSize };
+    }
+
+    let chars = Array.from(content);
+    while (chars.length > 1 && measure(`${chars.join('')}…`, currentSize, tracking, mono) > maxWidth) {
+        chars = chars.slice(0, -1);
+    }
+
+    return { text: `${chars.join('')}…`, size: currentSize };
+};
+
 /* ──────────────────────────  NERV PRIMITIVES  ────────────────────────── */
 
 /** Moldura técnica com hairline; sem cantos arredondados. */
@@ -157,19 +198,26 @@ const frame = (x: number, y: number, w: number, h: number, color: string, fill =
 
 /** Label "grudada" no canto superior-esquerdo da moldura, como nos painéis NERV. */
 const frameTag = (x: number, y: number, title: string, color: string): string =>
-    rect(x, y - 7, 16 + title.length * 8.4, 14, NERV.void, { stroke: color }) +
+    rect(x, y - 7, measure(title, 11, 2) + 16, 14, NERV.void, { stroke: color }) +
     rect(x, y - 7, 3, 14, color) +
     text(x + 13, y + 3.5, title, { size: 11, weight: 600, tracking: 2, fill: color });
 
 /** Cabeçalho de seção: bloco + rótulo display + fio ocupando o resto da linha. */
 const sectionHeader = (x: number, y: number, width: number, title: string, color: string, note?: string): string => {
-    const labelWidth = 12 + title.length * 9.2;
+    const titleWidth = measure(title, 14, 3.2);
+    const labelWidth = 19 + titleWidth;
+    const noteWidth = note ? measure(note, 11, 0, true) : 0;
+    const ruleStart = x + labelWidth + 8;
+    const ruleEnd = x + width - (note ? noteWidth + 12 : 0);
+
     let svg =
-        rect(x, y - 11, 11, 11, color) +
-        text(x + 19, y, title, { size: 14, weight: 700, tracking: 3.2, fill: color }) +
-        line(x + labelWidth, y - 5.5, width - labelWidth, 0, color, 0.35);
+        rect(x, y - 11, 11, 11, color) + text(x + 19, y, title, { size: 14, weight: 700, tracking: 3.2, fill: color });
+    if (ruleEnd > ruleStart) {
+        svg += line(ruleStart, y - 5.5, ruleEnd - ruleStart, 0, color, 0.35);
+    }
     if (note) {
-        svg += text(x + width, y, note, { size: 11, fill: NERV.muted, anchor: 'end', mono: true });
+        const fitted = fitText(note, Math.max(0, width - labelWidth - 20), 11, 0, true);
+        svg += text(x + width, y, fitted.text, { size: fitted.size, fill: NERV.muted, anchor: 'end', mono: true });
     }
     return svg;
 };
@@ -277,6 +325,8 @@ interface RailZone {
 interface RailOptions {
     /** Teto da escala (ex.: 600 para milissegundos). Padrão: 100 (percentual). */
     max: number;
+    /** Rótulo do extremo direito, usado quando `ticks` não é informado. */
+    maxLabel?: string;
     /** Zonas de qualidade desenhadas atrás do rail. */
     zones?: RailZone[];
     /** Marcações da escala exibidas abaixo do rail. */
@@ -313,8 +363,11 @@ const systemCard = (
     svg += segmentedRail(railX, y + h - 22, railW, 8, railRatio, railColor, 20, railOptions);
 
     const scaleMax = railOptions?.max ?? 100;
+    const scaleTicks = railOptions?.ticks ?? [
+        { at: scaleMax, label: railOptions?.maxLabel ?? '100%', anchor: 'end' as const }
+    ];
     svg += text(railX, y + h - 4, '0', { size: 10, mono: true, fill: NERV.dim });
-    for (const tick of railOptions?.ticks ?? []) {
+    for (const tick of scaleTicks) {
         const tx = railX + railW * Math.max(0, Math.min(1, tick.at / scaleMax));
         svg += text(tx, y + h - 4, tick.label, {
             size: 10,
@@ -578,41 +631,56 @@ export async function renderStatusImage(data: StatusImageData): Promise<Buffer> 
 
     /* ── Header ───────────────────────────────────────────────────────── */
     const headerCenter = 42;
+    const nowFt = DateTime.now().setZone('America/Fortaleza');
+    const subtitle = 'STATUS DE OPERAÇÃO // MONITORAMENTO EM TEMPO REAL';
+    const instanceLabel = data.banner ? 'BACKUP (FAILOVER)' : 'SERVIDOR PRIMÁRIO';
+
+    // Limites do header: título à esquerda, placa de instância ao centro-direita
+    // e bloco de data/hora encostado na borda direita.
+    const clockLine2 = `${nowFt.toFormat('HH:mm:ss')} GMT-3`;
+    const clockWidth = Math.max(
+        measure(`ATUALIZADO ${nowFt.toFormat('dd/MM/yyyy')}`, 12, 0, true),
+        measure(clockLine2, 11, 0, true)
+    );
+    const plateRight = WIDTH - PAD - clockWidth - 22;
+    const platePadding = 60;
+    const plateMinX = 400;
+    const plateLabel = fitText(instanceLabel, plateRight - plateMinX - platePadding, 12, 2);
+    const plateW = Math.min(plateRight - plateMinX, measure(plateLabel.text, plateLabel.size, 2) + platePadding);
+    const plateX = plateRight - plateW;
+    const plateH = 34;
+    const plateY = headerCenter - plateH / 2;
+
     svg += rect(PAD, headerCenter - 17, 3, 34, accent);
-    svg += text(PAD + 13, headerCenter + 2, 'KAMI BOT', {
+    svg += text(PAD + 13, headerCenter + 2, fitText('KAMI BOT', plateX - PAD - 30, 27, 5.5).text, {
         size: 27,
         weight: 700,
         tracking: 5.5,
         fill: NERV.text
     });
-    svg += text(PAD + 13, headerCenter + 20, 'STATUS DE OPERAÇÃO // MONITORAMENTO EM TEMPO REAL', {
-        size: 11,
+    const fittedSubtitle = fitText(subtitle, plateX - PAD - 26, 11, 0, true);
+    svg += text(PAD + 13, headerCenter + 20, fittedSubtitle.text, {
+        size: fittedSubtitle.size,
         mono: true,
         fill: NERV.muted
     });
 
-    const plateW = 186;
-    const plateH = 34;
-    const plateX = 520;
-    const plateY = headerCenter - plateH / 2;
-    const instanceLabel = data.banner ? 'BACKUP (FAILOVER)' : 'INSTÂNCIA PRIMÁRIA';
     svg += cutPlate(plateX, plateY, plateW, plateH, 10, data.banner ? bannerAccent : NERV.line);
     svg += statusDot(plateX + 16, headerCenter + 1, data.banner ? NERV.red : NERV.green);
-    svg += text(plateX + 32, headerCenter + 5, instanceLabel, {
-        size: 12,
+    svg += text(plateX + 32, headerCenter + 5, plateLabel.text, {
+        size: plateLabel.size,
         weight: 600,
         tracking: 2,
         fill: data.banner ? NERV.text : NERV.muted
     });
 
-    const nowFt = DateTime.now().setZone('America/Fortaleza');
     svg += text(WIDTH - PAD, headerCenter - 4, `ATUALIZADO ${nowFt.toFormat('dd/MM/yyyy')}`, {
         size: 12,
         mono: true,
         fill: NERV.text,
         anchor: 'end'
     });
-    svg += text(WIDTH - PAD, headerCenter + 14, `${nowFt.toFormat('HH:mm:ss')} GMT-3`, {
+    svg += text(WIDTH - PAD, headerCenter + 14, clockLine2, {
         size: 11,
         mono: true,
         fill: NERV.dim,
@@ -762,23 +830,23 @@ export async function renderStatusImage(data: StatusImageData): Promise<Buffer> 
 
     /* ── Rodapé ───────────────────────────────────────────────────────── */
     svg += line(PAD, footerTop, contentWidth, 0, NERV.line);
-    svg += text(PAD, footerTop + 20, `VER ${data.version}`, { size: 11, mono: true, fill: NERV.dim });
-    svg += text(PAD + 96, footerTop + 20, `NODE ${data.nodeVersion}`, {
+    const controlText = data.banner ? 'CONTROLE: SERVIDOR BACKUP' : 'CONTROLE: SERVIDOR PRIMÁRIO';
+    const controlWidth = measure(controlText, 11, 0, true);
+    const footerParts = [`VER ${data.version}`, `NODE ${data.nodeVersion}`, `UPTIME ${data.uptime.toUpperCase()}`];
+    const footerAvailable = contentWidth - controlWidth - 24;
+    let cursorX = PAD;
+    for (const part of footerParts) {
+        const fitted = fitText(part, footerAvailable - (cursorX - PAD), 11, 0, true);
+        if (!fitted.text) break;
+        svg += text(cursorX, footerTop + 20, fitted.text, { size: fitted.size, mono: true, fill: NERV.dim });
+        cursorX += measure(fitted.text, fitted.size, 0, true) + 22;
+    }
+    svg += text(WIDTH - PAD, footerTop + 20, controlText, {
         size: 11,
         mono: true,
-        fill: NERV.dim
+        fill: data.banner ? NERV.red : NERV.dim,
+        anchor: 'end'
     });
-    svg += text(PAD + 250, footerTop + 20, `UPTIME ${data.uptime.toUpperCase()}`, {
-        size: 11,
-        mono: true,
-        fill: NERV.dim
-    });
-    svg += text(
-        WIDTH - PAD,
-        footerTop + 20,
-        data.banner ? 'CONTROLE: INSTÂNCIA BACKUP' : 'CONTROLE: INSTÂNCIA PRIMÁRIA',
-        { size: 11, mono: true, fill: data.banner ? NERV.red : NERV.dim, anchor: 'end' }
-    );
 
     const svgDocument = `<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${height}" viewBox="0 0 ${WIDTH} ${height}">
 <style>

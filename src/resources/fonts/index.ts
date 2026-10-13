@@ -30,6 +30,7 @@ const searchDirs = (): string[] => [
 ];
 
 let cache: string | null = null;
+let loaded = false;
 
 const resolveFont = (file: string): string | null => {
     for (const dir of searchDirs()) {
@@ -57,9 +58,32 @@ export const getFontFacesCss = (): string => {
     }
 
     cache = rules.join('\n');
+    loaded = rules.length > 0;
+
+    if (!loaded) {
+        console.warn(
+            '[status-image] Fontes NERV não encontradas em:',
+            searchDirs().join(', '),
+            '- usando fontes do sistema.'
+        );
+    }
+
     return cache;
 };
 
-/** Nomes de família para uso nos elementos SVG, com fallback de sistema. */
-export const FONT_DISPLAY = "'NervDisplay', 'Arial Narrow', Impact, 'Haettenschweiler', sans-serif";
-export const FONT_MONO = "'NervMono', Consolas, 'JetBrains Mono', 'DejaVu Sans Mono', monospace";
+/** true quando os TTF foram encontrados e embutidos no SVG. */
+export const areFontsLoaded = (): boolean => {
+    getFontFacesCss();
+    return loaded;
+};
+
+/**
+ * Nomes de família para uso nos elementos SVG.
+ * O fallback prioriza fontes condensadas presentes em Ubuntu/Debian
+ * (Liberation Sans Narrow, DejaVu Sans Condensed) para o layout não estourar
+ * caso os TTF não sejam encontrados no deploy.
+ */
+export const FONT_DISPLAY =
+    "'NervDisplay', Oswald, 'Arial Narrow', 'Liberation Sans Narrow', 'DejaVu Sans Condensed', 'Roboto Condensed', Impact, sans-serif";
+export const FONT_MONO =
+    "'NervMono', 'Fira Code', Consolas, 'JetBrains Mono', 'DejaVu Sans Mono', 'Liberation Mono', monospace";
