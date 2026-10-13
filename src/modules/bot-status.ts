@@ -475,7 +475,7 @@ class BotStatus {
                     botStatusEmbed.setTitle(isBackup ? 'Status do Kami BOT (Servidor Backup)' : 'Status do Kami BOT');
                     botStatusEmbed.setDescription(
                         isBackup
-                            ? ':warning: **MODO BACKUP ATIVO**\nO servidor primário está offline, o servidor de backup asumiu o controle, o tempo de resposta do BOT pode ficar mais lento.'
+                            ? ':warning: **MODO BACKUP ATIVO**\nO servidor primário está offline, o servidor de backup assumiu o controle, o tempo de resposta do BOT pode ficar mais lento.'
                             : 'Monitoramento em tempo real do BOT e da comunidade.'
                     );
                     botStatusEmbed.setImage(`attachment://${fileName}`);
