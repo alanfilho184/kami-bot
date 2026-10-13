@@ -13,6 +13,8 @@ export interface StatusInteractionsRow {
 export interface StatusWeeklyPoint {
     label: string;
     total: number;
+    /** Total do mesmo dia da semana anterior. */
+    previous?: number;
     isToday: boolean;
 }
 
@@ -308,7 +310,7 @@ const COMMUNITY_CARD_HEIGHT = 96;
 const GRID_HEADER = 26;
 const GRID_ROW = 28;
 const GRID_FOOTER = 22;
-const CHART_HEIGHT = 236;
+const CHART_HEIGHT = 262;
 const BANNER_HEIGHT = 88;
 const PLATE_HEIGHT = 54;
 const HEADER_HEIGHT = 84;
@@ -487,26 +489,52 @@ const dataGrid = (rows: StatusInteractionsRow[], top: number, width: number, acc
     return svg;
 };
 
+/** Barra segmentada vertical (linguagem BarChart NERV): só blocos acesos. */
+const segmentedBar = (
+    cx: number,
+    baseline: number,
+    barWidth: number,
+    plotHeight: number,
+    ratio: number,
+    color: string,
+    opacity: number,
+    blocks = 12,
+    blockGap = 3
+): { svg: string; barHeight: number } => {
+    const lit = Math.max(ratio > 0 ? 1 : 0, Math.round(ratio * blocks));
+    const blockH = (plotHeight - blockGap * (blocks - 1)) / blocks;
+    const barHeight = lit * (blockH + blockGap) - blockGap;
+
+    let svg = '';
+    for (let b = 0; b < lit; b++) {
+        const by = baseline - (b + 1) * blockH - b * blockGap;
+        svg += rect(cx - barWidth / 2, by, barWidth, blockH, color, { opacity });
+    }
+    return { svg, barHeight };
+};
+
 const weeklyChart = (points: StatusWeeklyPoint[], top: number, width: number, accent: string): string => {
     const axisWidth = 64;
     const plotLeft = PAD + 14 + axisWidth;
     const plotRight = PAD + width - 14;
     const plotWidth = plotRight - plotLeft;
-    const baseline = top + CHART_HEIGHT - 40;
-    const plotTop = top + 30;
-    const plotHeight = baseline - plotTop;
+
+    const hasPrevious = points.some(point => (Number(point.previous) || 0) > 0);
+    const plotTop = top + 38;
+    const rowHeight = CHART_HEIGHT - 38 - 46;
+    const baseline = plotTop + rowHeight;
 
     let svg = frame(PAD, top, width, CHART_HEIGHT, NERV.line, NERV.panelAlt);
     svg += rect(PAD + 1, top + 1, width - 2, CHART_HEIGHT - 2, NERV.void, { opacity: 0.35 });
 
-    const totals = points.map(point => Number(point.total) || 0);
-    const max = niceMax(Math.max(...totals, 0));
+    const currentTotals = points.map(point => Number(point.total) || 0);
+    const previousTotals = points.map(point => Number(point.previous) || 0);
+    const max = niceMax(Math.max(...currentTotals, ...(hasPrevious ? previousTotals : []), 0));
 
     for (let step = 0; step <= 4; step++) {
         const ratio = step / 4;
-        const y = baseline - plotHeight * ratio;
-        svg += line(plotLeft, y, plotWidth, 0, accent, 0.18);
-        svg += text(plotLeft - 12, y + 4, compact(max * ratio), {
+        svg += line(plotLeft, baseline - rowHeight * ratio, plotWidth, 0, accent, 0.18);
+        svg += text(plotLeft - 12, baseline - rowHeight * ratio + 4, compact(max * ratio), {
             size: 11,
             mono: true,
             fill: NERV.dim,
@@ -514,28 +542,57 @@ const weeklyChart = (points: StatusWeeklyPoint[], top: number, width: number, ac
         });
     }
 
+    // Legenda
+    const legendY = top + 22;
+    const legendItem = (lx: number, label: string, color: string, filled: boolean): string =>
+        rect(lx, legendY - 7, 10, 10, filled ? color : 'none', {
+            stroke: color,
+            opacity: filled ? 0.95 : 0.8
+        }) + text(lx + 16, legendY + 2, label, { size: 10, weight: 600, tracking: 1.6, fill: NERV.muted });
+    let legendX = plotRight - measure('SEMANA ATUAL', 10, 1.6) - 24;
+    if (hasPrevious) {
+        svg += legendItem(legendX, 'SEMANA PASSADA', accent, false);
+        legendX -= measure('SEMANA ATUAL', 10, 1.6) + 34;
+        svg += legendItem(legendX, 'SEMANA ATUAL', accent, true);
+    } else {
+        svg += legendItem(legendX, 'SEMANA ATUAL', accent, true);
+    }
+
+    // Barras lado a lado por dia: semana passada à esquerda, atual à direita
     const slot = plotWidth / points.length;
-    const barWidth = Math.min(46, slot * 0.46);
-    const blocks = 12;
-    const blockGap = 3;
+    const innerGap = 8;
+    const barWidth = hasPrevious ? Math.min(38, (slot - innerGap - 26) / 2) : Math.min(46, slot * 0.5);
 
     points.forEach((point, index) => {
         const center = plotLeft + slot * index + slot / 2;
-        const ratio = max > 0 ? Math.max(0, Math.min(1, (Number(point.total) || 0) / max)) : 0;
+        const currentCx = hasPrevious ? center + (barWidth + innerGap) / 2 : center;
+        const previousCx = center - (barWidth + innerGap) / 2;
+        const currentRatio = max > 0 ? Math.max(0, Math.min(1, (Number(point.total) || 0) / max)) : 0;
+        const previousRatio = max > 0 ? Math.max(0, Math.min(1, (Number(point.previous) || 0) / max)) : 0;
 
-        // Barra segmentada: só os blocos acesos são desenhados (linguagem BarChart NERV)
-        const lit = Math.max(ratio > 0 ? 1 : 0, Math.round(ratio * blocks));
-        const blockH = (plotHeight - blockGap * (blocks - 1)) / blocks;
-        const barHeight = lit * (blockH + blockGap) - blockGap;
-
-        for (let b = 0; b < lit; b++) {
-            const by = baseline - (b + 1) * blockH - b * blockGap;
-            svg += rect(center - barWidth / 2, by, barWidth, blockH, accent, {
-                opacity: point.isToday ? 1 : 0.66
+        if (hasPrevious) {
+            const previous = segmentedBar(previousCx, baseline, barWidth, rowHeight, previousRatio, accent, 0.4);
+            svg += previous.svg;
+            svg += text(previousCx, baseline - previous.barHeight - 9, compact(point.previous ?? 0), {
+                size: 10,
+                mono: true,
+                fill: NERV.dim,
+                anchor: 'middle'
             });
         }
 
-        svg += text(center, baseline - barHeight - 12, compact(point.total), {
+        const current = segmentedBar(
+            currentCx,
+            baseline,
+            barWidth,
+            rowHeight,
+            currentRatio,
+            accent,
+            point.isToday ? 1 : 0.78
+        );
+        svg += current.svg;
+
+        svg += text(currentCx, baseline - current.barHeight - 11, compact(point.total), {
             size: 12,
             weight: point.isToday ? 700 : 400,
             mono: true,
@@ -543,7 +600,7 @@ const weeklyChart = (points: StatusWeeklyPoint[], top: number, width: number, ac
             anchor: 'middle'
         });
 
-        svg += text(center, baseline + 20, point.label.toUpperCase(), {
+        svg += text(center, baseline + 22, point.label.toUpperCase(), {
             size: 12,
             weight: point.isToday ? 700 : 400,
             tracking: 1.4,
@@ -552,7 +609,7 @@ const weeklyChart = (points: StatusWeeklyPoint[], top: number, width: number, ac
         });
 
         if (point.isToday) {
-            svg += rect(center - 12, baseline + 28, 24, 3, accent);
+            svg += rect(center - 12, baseline + 30, 24, 3, accent);
         }
     });
 
@@ -805,7 +862,12 @@ export async function renderStatusImage(data: StatusImageData): Promise<Buffer> 
 
     /* ── Uso na semana ────────────────────────────────────────────────── */
     const weeklyTotal = data.weeklyUsage.reduce((sum, point) => sum + (Number(point.total) || 0), 0);
-    svg += sectionHeader(PAD, chartTop - 12, contentWidth, 'USO NA SEMANA', accent, `${num(weeklyTotal)} INTERAÇÕES`);
+    const weeklyPreviousTotal = data.weeklyUsage.reduce((sum, point) => sum + (Number(point.previous) || 0), 0);
+    const weeklyNote =
+        weeklyPreviousTotal > 0
+            ? `${num(weeklyTotal)} INTERAÇÕES // ANT ${num(weeklyPreviousTotal)}`
+            : `${num(weeklyTotal)} INTERAÇÕES`;
+    svg += sectionHeader(PAD, chartTop - 12, contentWidth, 'USO NA SEMANA', accent, weeklyNote);
     svg += weeklyChart(data.weeklyUsage, chartTop, contentWidth, accent);
 
     /* ── Variações ────────────────────────────────────────────────────── */

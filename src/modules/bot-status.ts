@@ -200,7 +200,7 @@ class BotStatus {
                         FROM
                             logs
                         WHERE
-                            timestamp >= '${T_WEEK_START}'::timestamp
+                            timestamp >= '${T_WEEK_PREV_START}'::timestamp
                             AND timestamp < '${T_WEEK_END}'::timestamp
                         GROUP BY
                             1
@@ -363,9 +363,11 @@ class BotStatus {
         );
         const weeklyUsage = weekLabels.map((label, index) => {
             const day = weekStart.plus({ days: index });
+            const previousDay = day.minus({ weeks: 1 });
             return {
                 label: label,
                 total: usageByDay.get(day.toFormat('yyyy-MM-dd')) ?? 0,
+                previous: usageByDay.get(previousDay.toFormat('yyyy-MM-dd')) ?? 0,
                 isToday: day.hasSame(today, 'day')
             };
         });
@@ -487,6 +489,7 @@ class BotStatus {
                         ])
                     });
 
+                    const pingStart = Date.now();
                     await rest.patch(
                         Routes.channelMessage(
                             config.BOT_STATUS_CHANNEL_ID.channel_id,
@@ -506,6 +509,9 @@ class BotStatus {
                             ]
                         }
                     );
+                    const pingEnd = Date.now();
+
+                    this.discordData.restPing = pingEnd - pingStart;
                 } catch (err) {
                     logger.logText('ERROR', err);
                 } finally {
