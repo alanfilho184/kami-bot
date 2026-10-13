@@ -1,13 +1,13 @@
 {
     "name": "kami-bot-http",
-    "version": "5.1.7",
+    "version": "5.1.8",
     "main": "server.js",
     "scripts": {
         "start": "node dist/app.js",
         "format": "npx prettier --write .",
         "test": "jest -w 16 --forceExit",
         "test:coverage": "jest -w 16 --forceExit --coverage",
-        "build": "tsc",
+        "build": "tsc && node scripts/copy-assets.js",
         "build-start": "npm run build && npm run start",
         "build-test": "npm run build && npm run test"
     },
@@ -43,6 +43,7 @@
         "luxon": "^3.7.2",
         "os-utils": "^0.0.14",
         "prisma": "^6.2.1",
+        "sharp": "^0.35.5",
         "tweetnacl": "^1.0.3"
     },
     "devDependencies": {

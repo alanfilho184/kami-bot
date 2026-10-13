@@ -1,5 +1,4 @@
 import { DateTime } from 'luxon';
-import asciiTable from 'ascii-table';
 import db from '../configs/database';
 import config from '../configs/config';
 import ms from 'ms';
@@ -10,6 +9,7 @@ import os from 'os-utils';
 import logger from '../configs/logger';
 import { localization } from '../resources/localization';
 import { Available_Languages } from '../types/enums';
+import { renderStatusImage } from '../resources/utils/status-image';
 import { performance } from 'node:perf_hooks';
 
 class BotStatus {
@@ -19,6 +19,13 @@ class BotStatus {
     discordData: any = null;
     private timers: NodeJS.Timeout[] = [];
     private enabled: boolean = false;
+    private updating: boolean = false;
+
+    // Só existe status quando a instância está no controle: primária sempre,
+    // backup apenas depois de assumir (failover) - ver modules/take-over.ts
+    get isRunningOnBackup(): boolean {
+        return config.INSTANCE_TYPE === 'backup';
+    }
 
     get isActive(): boolean {
         return this.enabled;
@@ -87,6 +94,26 @@ class BotStatus {
     }
 
     async getDbData() {
+        const fortaleza = 'America/Fortaleza';
+        const nowFt = DateTime.now().setZone(fortaleza);
+        const todayStartUtc = nowFt.startOf('day').toUTC();
+        const yesterdayStartUtc = todayStartUtc.minus({ days: 1 });
+        const weekStartUtc = nowFt.startOf('week').toUTC();
+        const weekPrevStartUtc = weekStartUtc.minus({ weeks: 1 });
+        const weekEndUtc = weekStartUtc.plus({ weeks: 1 });
+        const monthStartUtc = nowFt.startOf('month').toUTC();
+        const prevMonthStartUtc = nowFt.startOf('month').minus({ months: 1 }).toUTC();
+
+        const fmt = (dt: DateTime) => dt.toFormat('yyyy-MM-dd HH:mm:ss.SSS');
+        const T_TODAY = fmt(todayStartUtc);
+        const T_YESTERDAY = fmt(yesterdayStartUtc);
+        const T_WEEK_START = fmt(weekStartUtc);
+        const T_WEEK_PREV_START = fmt(weekPrevStartUtc);
+        const T_WEEK_END = fmt(weekEndUtc);
+        const T_MONTH_START = fmt(monthStartUtc);
+        const T_PREV_MONTH_START = fmt(prevMonthStartUtc);
+        const T_RETENTION = fmt(prevMonthStartUtc);
+
         let pingStart = Date.now();
         const data = (
             (await db.$queryRawUnsafe(`
@@ -94,61 +121,61 @@ class BotStatus {
                     log_metrics AS (
                         SELECT
                             COUNT(CASE 
-                                WHEN action_type = 'COMMAND' AND timestamp >= NOW() - INTERVAL '24 hours' THEN 1 
+                                WHEN action_type = 'COMMAND' AND timestamp >= '${T_TODAY}'::timestamp THEN 1 
                                 END) AS total_commands_24h,
                             COUNT(CASE 
-                                WHEN action_type = 'COMPONENT' AND timestamp >= NOW() - INTERVAL '24 hours' THEN 1 
+                                WHEN action_type = 'COMPONENT' AND timestamp >= '${T_TODAY}'::timestamp THEN 1 
                                 END) AS total_components_24h,
                             COUNT(CASE 
                                 WHEN action_type = 'COMMAND'
-                                AND timestamp >= NOW() - INTERVAL '48 hours'
-                                AND timestamp < NOW() - INTERVAL '24 hours' THEN 1
+                                AND timestamp >= '${T_YESTERDAY}'::timestamp
+                                AND timestamp < '${T_TODAY}'::timestamp THEN 1
                                 END) AS total_commands_prev_24h,
                             COUNT(CASE 
                                 WHEN action_type = 'COMPONENT'
-                                AND timestamp >= NOW() - INTERVAL '48 hours'
-                                AND timestamp < NOW() - INTERVAL '24 hours' THEN 1
+                                AND timestamp >= '${T_YESTERDAY}'::timestamp
+                                AND timestamp < '${T_TODAY}'::timestamp THEN 1
                                 END) AS total_components_prev_24h,
                             COUNT(CASE 
-                                WHEN action_type = 'COMMAND' AND timestamp >= NOW() - INTERVAL '7 days' THEN 1 
+                                WHEN action_type = 'COMMAND' AND timestamp >= '${T_WEEK_START}'::timestamp THEN 1 
                                 END) AS total_commands_7d,
                             COUNT(CASE 
-                                WHEN action_type = 'COMPONENT' AND timestamp >= NOW() - INTERVAL '7 days' THEN 1 
+                                WHEN action_type = 'COMPONENT' AND timestamp >= '${T_WEEK_START}'::timestamp THEN 1 
                                 END) AS total_components_7d,
                             COUNT(CASE 
                                 WHEN action_type = 'COMMAND'
-                                AND timestamp >= NOW() - INTERVAL '14 days'
-                                AND timestamp < NOW() - INTERVAL '7 days' THEN 1
+                                AND timestamp >= '${T_WEEK_PREV_START}'::timestamp
+                                AND timestamp < '${T_WEEK_START}'::timestamp THEN 1
                                 END) AS total_commands_prev_7d,
                             COUNT(CASE 
                                 WHEN action_type = 'COMPONENT'
-                                AND timestamp >= NOW() - INTERVAL '14 days'
-                                AND timestamp < NOW() - INTERVAL '7 days' THEN 1
+                                AND timestamp >= '${T_WEEK_PREV_START}'::timestamp
+                                AND timestamp < '${T_WEEK_START}'::timestamp THEN 1
                                 END) AS total_components_prev_7d,
                             COUNT(CASE 
-                                WHEN action_type = 'COMMAND' AND timestamp >= NOW() - INTERVAL '30 days' THEN 1 
+                                WHEN action_type = 'COMMAND' AND timestamp >= '${T_MONTH_START}'::timestamp THEN 1 
                                 END) AS total_commands_30d,
                             COUNT(CASE 
-                                WHEN action_type = 'COMPONENT' AND timestamp >= NOW() - INTERVAL '30 days' THEN 1 
+                                WHEN action_type = 'COMPONENT' AND timestamp >= '${T_MONTH_START}'::timestamp THEN 1 
                                 END) AS total_components_30d,
                             COUNT(CASE 
                                 WHEN action_type = 'COMMAND' 
-                                AND timestamp >= DATE_TRUNC('month', NOW() - INTERVAL '1 month') 
-                                AND timestamp < DATE_TRUNC('month', NOW()) 
+                                AND timestamp >= '${T_PREV_MONTH_START}'::timestamp
+                                AND timestamp < '${T_MONTH_START}'::timestamp
                                 THEN 1 
                                 END) AS total_commands_prev_month,
 
                             COUNT(CASE 
                                 WHEN action_type = 'COMPONENT' 
-                                AND timestamp >= DATE_TRUNC('month', NOW() - INTERVAL '1 month') 
-                                AND timestamp < DATE_TRUNC('month', NOW()) 
+                                AND timestamp >= '${T_PREV_MONTH_START}'::timestamp
+                                AND timestamp < '${T_MONTH_START}'::timestamp
                                 THEN 1 
                                 END) AS total_components_prev_month
 
                         FROM
                             logs
                         WHERE
-                            timestamp >= NOW() - INTERVAL '60 days'
+                            timestamp >= '${T_RETENTION}'::timestamp
                     ),
                     total_logs as (
                         SELECT 
@@ -165,6 +192,18 @@ class BotStatus {
                             ) as total_components
                         FROM
                             logs
+                    ),
+                    weekly_days AS (
+                        SELECT
+                            ((timestamp AT TIME ZONE 'UTC') AT TIME ZONE 'America/Fortaleza')::date AS day,
+                            COUNT(*) AS total
+                        FROM
+                            logs
+                        WHERE
+                            timestamp >= '${T_WEEK_START}'::timestamp
+                            AND timestamp < '${T_WEEK_END}'::timestamp
+                        GROUP BY
+                            1
                     )
 
                     SELECT
@@ -186,7 +225,10 @@ class BotStatus {
                         l.total_components_30d AS total_components_month,
                         
                         l.total_commands_prev_month AS total_commands_prev_month,
-                        l.total_components_prev_month AS total_components_prev_month
+                        l.total_components_prev_month AS total_components_prev_month,
+
+                        (SELECT COALESCE(json_agg(json_build_object('day', day, 'total', total) ORDER BY day), '[]'::json)
+                         FROM weekly_days) AS weekly_usage
                     FROM
                         log_metrics l
                     CROSS JOIN
@@ -210,9 +252,23 @@ class BotStatus {
                 total_components_month: number;
                 total_commands_prev_month: number;
                 total_components_prev_month: number;
+                weekly_usage: { day: string; total: number }[] | string;
             }[]
         )[0];
         let pingEnd = Date.now();
+
+        let weeklyUsage: { day: string; total: number }[] = [];
+        const rawWeeklyUsage = data?.weekly_usage;
+        if (Array.isArray(rawWeeklyUsage)) {
+            weeklyUsage = rawWeeklyUsage as { day: string; total: number }[];
+        } else if (typeof rawWeeklyUsage === 'string') {
+            try {
+                const parsed = JSON.parse(rawWeeklyUsage);
+                if (Array.isArray(parsed)) weeklyUsage = parsed;
+            } catch {
+                weeklyUsage = [];
+            }
+        }
 
         this.dbData = {
             totalUsers: Number(data.total_users),
@@ -232,6 +288,7 @@ class BotStatus {
             totalComponentsMonth: Number(data.total_components_month),
             totalCommandsPrevMonth: Number(data.total_commands_prev_month),
             totalComponentsPrevMonth: Number(data.total_components_prev_month),
+            weeklyUsage: weeklyUsage,
             dbPing: pingEnd - pingStart
         };
     }
@@ -253,21 +310,17 @@ class BotStatus {
         };
     }
 
-    async buildTable() {
-        const tableGeneral = new asciiTable('Kami BOT - Status');
-
-        let uptime = process.uptime();
-        let days = Math.floor((uptime % 31536000) / 86400);
-        let hours = Math.floor((uptime % 86400) / 3600);
-        let minutes = Math.floor((uptime % 3600) / 60);
-        let botuptime =
+    async buildStatusImage(): Promise<Buffer> {
+        const uptime = process.uptime();
+        const days = Math.floor((uptime % 31536000) / 86400);
+        const hours = Math.floor((uptime % 86400) / 3600);
+        const minutes = Math.floor((uptime % 3600) / 60);
+        const botuptime =
             (days > 0 ? (days == 1 ? days + ' dia ' : days + ' dias ') : '') +
             (hours > 0 ? (hours == 1 ? hours + ' hora ' : hours + ' horas ') : '') +
             (minutes > 0 ? (minutes == 1 ? minutes + ' minuto ' : minutes + ' minutos ') : '');
 
         const stats = this.getProcessStats();
-        const ram = stats.memory.toFixed(2);
-        const cpu = stats.cpu;
 
         const totalInteractionsDay =
             Number(this.dbData?.totalCommandsToday || 0) + Number(this.dbData?.totalComponentsToday || 0);
@@ -292,103 +345,110 @@ class BotStatus {
 
         const dailyGrowth = formatGrowth(totalInteractionsDay, totalInteractionsPrevDay);
         const weeklyGrowth = formatGrowth(totalInteractionsWeek, totalInteractionsPrevWeek);
-        const interactionsGrowth = formatGrowth(totalInteractionsMonth, totalInteractionsPrevMonth);
+        const monthlyGrowth = formatGrowth(totalInteractionsMonth, totalInteractionsPrevMonth);
 
-        tableGeneral.addRow('Uso de CPU', `${cpu} %`);
-        tableGeneral.addRow('Uso de RAM', `${ram} MB`);
-        tableGeneral.addRow(
-            'Ram Total',
-            `${(os.totalmem() / 1024 - os.freemem() / 1024).toFixed(1)} GB / ${(os.totalmem() / 1024).toFixed(1)} GB`
-        );
-        tableGeneral.addRow(
-            'Ping',
-            `REST API: ${this.discordData?.restPing ? this.discordData.restPing + ' ms' : 'N/A'} - DB: ${this.dbData?.dbPing ? this.dbData.dbPing + ' ms' : 'N/A'}`
-        );
-        tableGeneral.addRow(' '.repeat(16), ' '.repeat(33));
-        tableGeneral.addRow('Servidores', `${this.discordData?.approximateGuildCount}`);
-        tableGeneral.addRow('Usuários', `${this.dbData?.totalUsers}`);
-        tableGeneral.addRow('Usuários Ativos', `${this.dbData?.totalActiveUsers} (Últimos 30 dias)`);
-        tableGeneral.addRow('Fichas Criadas', `${this.dbData?.totalSheetsCreated} Fichas`);
+        // os-utils já devolve MB, então /1024 converte para GB
+        const ramTotalGb = os.totalmem() / 1024;
+        const ramUsedGb = os.totalmem() / 1024 - os.freemem() / 1024;
+        const accentColor = Number(config.EMBED_COLOR);
 
-        const tableInteractions = new asciiTable('Interações');
-        tableInteractions.setAlign(1, asciiTable.CENTER);
-        tableInteractions.setAlign(2, asciiTable.CENTER);
-        tableInteractions.setAlign(3, asciiTable.CENTER);
-        tableInteractions.setAlign(4, asciiTable.CENTER);
+        const weekLabels = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
+        const weekStart = DateTime.now().setZone('America/Fortaleza').startOf('week');
+        const today = DateTime.now().setZone('America/Fortaleza');
+        const usageByDay = new Map<string, number>(
+            (Array.isArray(this.dbData?.weeklyUsage) ? this.dbData.weeklyUsage : []).map((entry: any) => [
+                String(entry?.day),
+                Number(entry?.total || 0)
+            ])
+        );
+        const weeklyUsage = weekLabels.map((label, index) => {
+            const day = weekStart.plus({ days: index });
+            return {
+                label: label,
+                total: usageByDay.get(day.toFormat('yyyy-MM-dd')) ?? 0,
+                isToday: day.hasSame(today, 'day')
+            };
+        });
 
-        tableInteractions.setHeading('', 'Comandos', 'Componentes', 'Total');
-        tableInteractions.addRow(' '.repeat(11), ' '.repeat(9), ' '.repeat(10), ' '.repeat(7));
-        tableInteractions.addRow(
-            'Últimas 24 horas',
-            `${this.dbData?.totalCommandsToday}`,
-            `${this.dbData?.totalComponentsToday}`,
-            `${totalInteractionsDay}`
-        );
-        tableInteractions.addRow(
-            '24h Anteriores',
-            `${this.dbData?.totalCommandsPrevDay}`,
-            `${this.dbData?.totalComponentsPrevDay}`,
-            `${totalInteractionsPrevDay}`
-        );
-        tableInteractions.addRow(' '.repeat(11), ' '.repeat(9), ' '.repeat(10), ' '.repeat(7));
-        tableInteractions.addRow(
-            'Última Semana',
-            `${this.dbData?.totalCommandsWeek}`,
-            `${this.dbData?.totalComponentsWeek}`,
-            `${totalInteractionsWeek}`
-        );
-        tableInteractions.addRow(
-            'Semana Anterior',
-            `${this.dbData?.totalCommandsPrevWeek}`,
-            `${this.dbData?.totalComponentsPrevWeek}`,
-            `${totalInteractionsPrevWeek}`
-        );
-        tableInteractions.addRow(' '.repeat(11), ' '.repeat(9), ' '.repeat(10), ' '.repeat(7));
-        tableInteractions.addRow(
-            'Último Mês',
-            `${this.dbData?.totalCommandsMonth}`,
-            `${this.dbData?.totalComponentsMonth}`,
-            `${totalInteractionsMonth}`
-        );
-        tableInteractions.addRow(
-            'Mês Anterior',
-            `${this.dbData?.totalCommandsPrevMonth}`,
-            `${this.dbData?.totalComponentsPrevMonth}`,
-            `${totalInteractionsPrevMonth}`
-        );
-        tableInteractions.addRow(' '.repeat(11), ' '.repeat(9), ' '.repeat(10), ' '.repeat(7));
-        tableInteractions.addRow(
-            'Desde o início',
-            `${this.dbData?.totalCommands}`,
-            `${this.dbData?.totalComponents}`,
-            `${this.dbData?.totalCommands + this.dbData?.totalComponents}`
-        );
-
-        const tableFooter = new asciiTable();
-        tableFooter.addRow('Variação Diária', dailyGrowth);
-        tableFooter.addRow('Variação Semanal', weeklyGrowth);
-        tableFooter.addRow('Variação Mensal', interactionsGrowth);
-        tableFooter.addRow(' '.repeat(16), ' '.repeat(33));
-        tableFooter.addRow('Versão do Kami', `v${config.VERSION}`);
-        tableFooter.addRow('Node.js', `${process.version}`);
-        tableFooter.addRow('', '');
-        tableFooter.addRow('Tempo Online', botuptime);
-
-        let tableGeneralString = tableGeneral.toString() as string;
-        let tableGeneralArray = tableGeneralString.split('\n');
-        tableGeneralArray.pop();
-        tableGeneralString = tableGeneralArray.join('\n');
-
-        let tableInteractionsString = tableInteractions.toString() as string;
-        tableInteractionsString = tableInteractionsString.split(`.`).join('|');
-        tableInteractionsString = tableInteractionsString.split(`'`).join('|');
-
-        let tableFooterString = tableFooter.toString() as string;
-        let tableFooterArray = tableFooterString.split('\n');
-        tableFooterArray.splice(0, 1);
-        tableFooterString = tableFooterArray.join('\n');
-
-        return tableGeneralString + '\n' + tableInteractionsString + '\n' + tableFooterString;
+        return renderStatusImage({
+            cpu: Number(stats.cpu),
+            memory: Number(stats.memory.toFixed(2)),
+            ramUsedGb: Number(ramUsedGb.toFixed(1)),
+            ramTotalGb: Number(ramTotalGb.toFixed(1)),
+            restPing: Number(this.discordData?.restPing || 0),
+            dbPing: Number(this.dbData?.dbPing || 0),
+            uptime: botuptime,
+            guildCount: Number(this.discordData?.approximateGuildCount || 0),
+            userCount: Number(this.dbData?.totalUsers || 0),
+            activeUsers: Number(this.dbData?.totalActiveUsers || 0),
+            sheetsCreated: Number(this.dbData?.totalSheetsCreated || 0),
+            interactions: [
+                {
+                    label: 'Hoje',
+                    commands: Number(this.dbData?.totalCommandsToday || 0),
+                    components: Number(this.dbData?.totalComponentsToday || 0),
+                    total: totalInteractionsDay,
+                    highlight: true
+                },
+                {
+                    label: 'Ontem',
+                    commands: Number(this.dbData?.totalCommandsPrevDay || 0),
+                    components: Number(this.dbData?.totalComponentsPrevDay || 0),
+                    total: totalInteractionsPrevDay
+                },
+                {
+                    label: 'Esta Semana',
+                    commands: Number(this.dbData?.totalCommandsWeek || 0),
+                    components: Number(this.dbData?.totalComponentsWeek || 0),
+                    total: totalInteractionsWeek,
+                    highlight: true
+                },
+                {
+                    label: 'Semana Passada',
+                    commands: Number(this.dbData?.totalCommandsPrevWeek || 0),
+                    components: Number(this.dbData?.totalComponentsPrevWeek || 0),
+                    total: totalInteractionsPrevWeek
+                },
+                {
+                    label: 'Este Mês',
+                    commands: Number(this.dbData?.totalCommandsMonth || 0),
+                    components: Number(this.dbData?.totalComponentsMonth || 0),
+                    total: totalInteractionsMonth,
+                    highlight: true
+                },
+                {
+                    label: 'Mês Passado',
+                    commands: Number(this.dbData?.totalCommandsPrevMonth || 0),
+                    components: Number(this.dbData?.totalComponentsPrevMonth || 0),
+                    total: totalInteractionsPrevMonth
+                },
+                {
+                    label: 'Desde o início',
+                    commands: Number(this.dbData?.totalCommands || 0),
+                    components: Number(this.dbData?.totalComponents || 0),
+                    total: Number(this.dbData?.totalCommands || 0) + Number(this.dbData?.totalComponents || 0)
+                }
+            ],
+            dailyGrowth: dailyGrowth,
+            weeklyGrowth: weeklyGrowth,
+            monthlyGrowth: monthlyGrowth,
+            weeklyUsage: weeklyUsage,
+            version: config.VERSION,
+            nodeVersion: process.version,
+            accent:
+                Number.isFinite(accentColor) && accentColor >= 0
+                    ? '#' + (accentColor >>> 0).toString(16).padStart(6, '0').slice(-6)
+                    : '#0082ff',
+            banner: this.isRunningOnBackup
+                ? {
+                      text: 'MODO BACKUP ATIVO',
+                      detail: 'O servidor primário está offline, o servidor de backup assumiu o controle.',
+                      // severidade "warning" do design NERV
+                      color: '#FF9900',
+                      accent: '#FF9900'
+                  }
+                : null
+        });
     }
 
     async updateStatusMessage() {
@@ -401,14 +461,24 @@ class BotStatus {
                 console.warn('Bot status data not loaded yet. Skipping status update.');
                 return;
             } else {
+                if (this.updating) return;
+                this.updating = true;
+
                 try {
-                    const table = await this.buildTable();
-                    const content = `\`\`\`\n${table}\`\`\``;
+                    const isBackup = this.isRunningOnBackup;
+                    const image = await this.buildStatusImage();
+                    // Nome único a cada ciclo para evitar cache antigo da CDN do Discord
+                    const fileName = `kami-status-${Math.floor(Date.now() / 60000)}.png`;
 
                     const botStatusEmbed = new EmbedBuilder();
-                    botStatusEmbed.setColor(parseInt(config.EMBED_COLOR));
-                    botStatusEmbed.setTitle('Status do Kami BOT');
-                    botStatusEmbed.setDescription(content);
+                    botStatusEmbed.setColor(isBackup ? 0xff9900 : Number(config.EMBED_COLOR));
+                    botStatusEmbed.setTitle(isBackup ? 'Status do Kami BOT (Servidor Backup)' : 'Status do Kami BOT');
+                    botStatusEmbed.setDescription(
+                        isBackup
+                            ? ':warning: **MODO BACKUP ATIVO**\nO servidor primário está offline, o servidor de backup asumiu o controle, o tempo de resposta do BOT pode ficar mais lento.'
+                            : 'Monitoramento em tempo real do BOT e da comunidade.'
+                    );
+                    botStatusEmbed.setImage(`attachment://${fileName}`);
                     botStatusEmbed.setTimestamp(Date.now());
                     botStatusEmbed.setFooter({
                         text: localization(Available_Languages['pt-br'], 'embed|footer', [
@@ -423,16 +493,23 @@ class BotStatus {
                             config.BOT_STATUS_MESSAGE_ID.msg_id
                         ),
                         {
-                            headers: {
-                                'Content-Type': 'application/json'
-                            },
                             body: {
-                                embeds: [botStatusEmbed.toJSON()]
-                            }
+                                embeds: [botStatusEmbed.toJSON()],
+                                files: [{ attachment: `attachment://${fileName}`, name: fileName }]
+                            },
+                            files: [
+                                {
+                                    name: fileName,
+                                    data: image,
+                                    contentType: 'image/png'
+                                }
+                            ]
                         }
                     );
                 } catch (err) {
                     logger.logText('ERROR', err);
+                } finally {
+                    this.updating = false;
                 }
             }
         }
