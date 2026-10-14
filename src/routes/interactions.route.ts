@@ -9,10 +9,16 @@ import { localization } from '../resources/localization';
 import { Available_Languages, Command_Category } from '../types/enums';
 import actionHandler from '../resources/utils/action-handler';
 import announcements from '../modules/announcements';
+import metrics from '../resources/utils/metrics';
+import { performance } from 'node:perf_hooks';
 
 const router = Router();
 
 router.post('/interactions', async (req: Request, res: Response) => {
+    // Marcador monotônico do início do processamento: o delta Date.now() abaixo
+    // depende do sync com o relógio do Discord, este não.
+    const receivedAt = performance.now();
+
     let int: Interaction;
     try {
         int = new Interaction(req.body, res);
@@ -24,6 +30,13 @@ router.post('/interactions', async (req: Request, res: Response) => {
             return logger.logText('ERROR', err);
         }
     }
+
+    // Latência de entrada: do momento em que o Discord criou a interação até
+    // a requisição chegar aqui. O valor vai CRU (com sinal) de propósito: um
+    // delta negativo ou quase zero revela que o relógio local está fora de
+    // sincronia com o do Discord, e um clamp aqui esconderia esse sintoma.
+    const ingress = Date.now() - int.createdTimestamp;
+    const record = () => metrics.recordInteraction(ingress, performance.now() - receivedAt);
 
     if ((int.user.system === true || int.user.bot === true) && int.type != 1) {
         return res.end();
@@ -95,6 +108,8 @@ router.post('/interactions', async (req: Request, res: Response) => {
                     await int.reply({
                         content: localization(int.language, 'cmd-interaction|command-error')
                     });
+                } finally {
+                    record();
                 }
             }
         }
@@ -161,6 +176,8 @@ router.post('/interactions', async (req: Request, res: Response) => {
                         await int.reply({
                             content: localization(int.language, 'cmd-interaction|command-error')
                         });
+                    } finally {
+                        record();
                     }
                 }
             }

@@ -32,6 +32,14 @@ export interface StatusImageData {
     ramTotalGb: number;
     restPing?: number;
     dbPing?: number;
+    /** Latência de entrada (ms) ou null quando não há dado confiável. */
+    ingressLatency?: number | null;
+    /** Desvio aplicado na correção (ms), ou null se não medido/velho. */
+    clockOffsetMs?: number | null;
+    /** Ciclo do status: encode da imagem + upload da mensagem. */
+    cycleMs?: number;
+    encodeMs?: number;
+    uploadMs?: number;
     uptime: string;
     guildCount?: number;
     userCount?: number;
@@ -53,6 +61,16 @@ export interface StatusImageData {
 const WIDTH = 900;
 const PAD = 20;
 const DENSITY = 144;
+
+/**
+ * Formato de saída: WebP lossless. Medido no layout atual, entrega os mesmos
+ * pixels do PNG com ~46% menos payload (529 KB -> 286 KB), o que reduz o
+ * buffer em memória e o tempo de upload a cada ciclo de 1 minuto.
+ * O Discord aceita webp em anexos/embeds.
+ */
+export const STATUS_IMAGE_EXTENSION = 'webp';
+export const STATUS_IMAGE_MIME = 'image/webp';
+const WEBP_EFFORT = 6;
 
 const NERV = {
     void: '#000000',
@@ -315,14 +333,83 @@ const BANNER_HEIGHT = 88;
 const PLATE_HEIGHT = 54;
 const HEADER_HEIGHT = 84;
 const FOOTER_HEIGHT = 34;
-/** Teto da escala do card de latência (ms) — zonas: 0-200 / 200-400 / 400-600. */
-const LATENCY_SCALE = 600;
 
 interface RailZone {
     start: number;
     end: number;
     color: string;
 }
+
+/**
+ * Escalas e limiares de severidade das métricas de latência.
+ *
+ * `LATÊNCIA DE SAÍDA` mede uma ida e volta (`GET /applications/@me`), enquanto
+ * `LATÊNCIA DE ENTRADA` mede só a ida (snowflake -> chegada no processo). As
+ * duas compartilham o mesmo caminho de rede, então a componente de rede da
+ * segunda é aproximadamente metade: por isso as escalas não podem ser iguais.
+ *
+ * Os limiares de cor seguem a mesma severidade relativa nos dois cards, de modo
+ * que grandezas comparáveis nunca sejam julgadas de forma contraditória.
+ */
+interface LatencyScale {
+    /** Teto da escala (ms). */
+    max: number;
+    /** Acima disso: âmbar. */
+    warn: number;
+    /** Acima disso: vermelho. */
+    critical: number;
+    ticks: { at: number; label: string; anchor?: 'start' | 'middle' | 'end' }[];
+    zones: { start: number; end: number }[];
+}
+
+const API_LATENCY: LatencyScale = {
+    max: 600,
+    warn: 200,
+    critical: 400,
+    ticks: [
+        { at: 200, label: '200' },
+        { at: 400, label: '400' },
+        { at: 600, label: '600 MS', anchor: 'end' }
+    ],
+    zones: [
+        { start: 0, end: 200 },
+        { start: 200, end: 400 },
+        { start: 400, end: 600 }
+    ]
+};
+
+const INGRESS: LatencyScale = {
+    max: 300,
+    warn: 100,
+    critical: 200,
+    ticks: [
+        { at: 100, label: '100' },
+        { at: 200, label: '200' },
+        { at: 300, label: '300 MS', anchor: 'end' }
+    ],
+    zones: [
+        { start: 0, end: 100 },
+        { start: 100, end: 200 },
+        { start: 200, end: 300 }
+    ]
+};
+
+const severityColor = (value: number, scale: LatencyScale, accent: string): string => {
+    if (value > scale.critical) return NERV.red;
+    if (value > scale.warn) return NERV.orange;
+    return accent;
+};
+
+/** Preenche a primeira zona com o accent do card e as demais com as cores de estado. */
+const latencyRailOptions = (scale: LatencyScale, accent: string): RailOptions => ({
+    max: scale.max,
+    ticks: scale.ticks,
+    zones: scale.zones.map((zone, index) => ({
+        start: zone.start,
+        end: zone.end,
+        color: index === 0 ? accent : index === 1 ? NERV.orange : NERV.red
+    }))
+});
 
 interface RailOptions {
     /** Teto da escala (ex.: 600 para milissegundos). Padrão: 100 (percentual). */
@@ -344,7 +431,7 @@ const systemCard = (
     label: string,
     value: string,
     unit: string,
-    detail: string,
+    detail: string | string[],
     railRatio: number,
     railColor: string,
     accent: string,
@@ -353,12 +440,29 @@ const systemCard = (
     let svg = frame(x, y, w, h, NERV.line, NERV.panelAlt);
     svg += frameTag(x, y, code, accent);
     svg += text(x + 14, y + 26, label, { size: 12, weight: 600, tracking: 2.4, fill: NERV.muted });
-    svg += text(x + 14, y + 62, value, { size: 32, weight: 700, mono: true, fill: NERV.text });
+
+    // valor: encolhe até caber ao lado da unidade
+    const valueMax = unit ? w - 28 - measure(unit, 13, 0, true) - 10 : w - 28;
+    const fittedValue = fitText(value, valueMax, 32, 0, true, 16);
+    svg += text(x + 14, y + 62, fittedValue.text, { size: fittedValue.size, weight: 700, mono: true, fill: NERV.text });
     if (unit) {
-        const valueWidth = value.length * 19.5;
-        svg += text(x + 20 + valueWidth, y + 62, unit, { size: 13, mono: true, fill: NERV.muted });
+        svg += text(x + 18 + measure(fittedValue.text, fittedValue.size, 0, true), y + 62, unit, {
+            size: 13,
+            mono: true,
+            fill: NERV.muted
+        });
     }
-    svg += text(x + 14, y + 82, detail, { size: 11, mono: true, fill: NERV.dim });
+
+    // detalhe: 1 ou 2 linhas, cada uma encolhida/cortada até caber no card
+    const details = Array.isArray(detail) ? detail : [detail];
+    details.slice(0, 2).forEach((line, index) => {
+        const fitted = fitText(line, w - 28, 11, 0, true, 9);
+        svg += text(x + 14, y + 82 + index * 15, fitted.text, {
+            size: fitted.size,
+            mono: true,
+            fill: index === 0 ? NERV.dim : NERV.muted
+        });
+    });
 
     const railX = x + 14;
     const railW = w - 28;
@@ -751,8 +855,8 @@ export async function renderStatusImage(data: StatusImageData): Promise<Buffer> 
     }
 
     /* ── Sistema ──────────────────────────────────────────────────────── */
-    svg += sectionHeader(PAD, systemTop - 12, contentWidth, 'SISTEMA', accent, 'CPU / MEMÓRIA / REDE');
-    const systemCardWidth = (contentWidth - gap * 2) / 3;
+    svg += sectionHeader(PAD, systemTop - 12, contentWidth, 'SISTEMA', accent, 'RECURSOS E LATÊNCIA');
+    const systemCardWidth = (contentWidth - gap * 3) / 4;
     svg += systemCard(
         PAD,
         systemTop,
@@ -781,34 +885,52 @@ export async function renderStatusImage(data: StatusImageData): Promise<Buffer> 
         accent,
         accent
     );
+    // Os cards têm 206 unidades de largura e `measure()` é pessimista de propósito
+    // (protege o fallback DejaVu, mais largo que as fontes bundladas). Com esses
+    // dois fatores o `fitText` corta o detalhe a partir de ~24 caracteres, então
+    // as strings abaixo ficam nesse limite para não encolher a fonte.
     const restPing = Number(data.restPing ?? 0);
-    const pingColor = restPing > 400 ? NERV.red : restPing > 200 ? NERV.orange : accent;
     svg += systemCard(
         PAD + (systemCardWidth + gap) * 2,
         systemTop,
         systemCardWidth,
         SYSTEM_CARD_HEIGHT,
         'SYS-03',
-        'LATÊNCIA',
-        String(restPing),
+        'LATÊNCIA DE SAÍDA',
+        String(Math.round(restPing)),
         'ms',
-        `DB ${data.dbPing ?? 0} ms`,
-        Math.min(1, restPing / LATENCY_SCALE),
-        pingColor,
+        `roundtrip // DB ${data.dbPing ?? 0} ms`,
+        Math.min(1, restPing / API_LATENCY.max),
+        severityColor(restPing, API_LATENCY, accent),
         accent,
-        {
-            max: LATENCY_SCALE,
-            zones: [
-                { start: 0, end: 200, color: accent },
-                { start: 200, end: 400, color: NERV.orange },
-                { start: 400, end: 600, color: NERV.red }
-            ],
-            ticks: [
-                { at: 200, label: '200' },
-                { at: 400, label: '400' },
-                { at: 600, label: '600 MS', anchor: 'end' }
-            ]
-        }
+        latencyRailOptions(API_LATENCY, accent)
+    );
+    const clockOffset = data.clockOffsetMs ?? null;
+    // "ajustado" (e não "ajuste") deixa claro que o desvio JÁ foi descontado do
+    // número acima do card — não é uma instrução para o usuário corrigir. O
+    // escopo é o valor exibido, não o relógio: a sonda nunca mexe no SO.
+    const offsetText =
+        clockOffset === null
+            ? 'relogio n/d'
+            : `valor ajustado ${clockOffset < 0 ? '' : '+'}${Math.round(clockOffset)} ms`;
+
+    const ingressRaw = data.ingressLatency ?? null;
+    const ingress = ingressRaw === null ? 0 : ingressRaw;
+    const ingressSkewed = ingressRaw === null;
+    svg += systemCard(
+        PAD + (systemCardWidth + gap) * 3,
+        systemTop,
+        systemCardWidth,
+        SYSTEM_CARD_HEIGHT,
+        'SYS-04',
+        'LATÊNCIA DE ENTRADA',
+        ingressSkewed ? 'INDISPONÍVEL' : String(Math.round(ingress)),
+        ingressSkewed ? '' : 'ms',
+        ingressSkewed ? 'relogio ≠ discord' : offsetText,
+        ingressSkewed ? 0 : Math.min(1, ingress / INGRESS.max),
+        ingressSkewed ? NERV.orange : severityColor(ingress, INGRESS, accent),
+        accent,
+        latencyRailOptions(INGRESS, accent)
     );
 
     /* ── Comunidade ───────────────────────────────────────────────────── */
@@ -894,7 +1016,14 @@ export async function renderStatusImage(data: StatusImageData): Promise<Buffer> 
     svg += line(PAD, footerTop, contentWidth, 0, NERV.line);
     const controlText = data.banner ? 'CONTROLE: SERVIDOR BACKUP' : 'CONTROLE: SERVIDOR PRIMÁRIO';
     const controlWidth = measure(controlText, 11, 0, true);
-    const footerParts = [`VER ${data.version}`, `NODE ${data.nodeVersion}`, `UPTIME ${data.uptime.toUpperCase()}`];
+    const cycle = Number(data.cycleMs ?? 0);
+    const cycleText = cycle > 0 ? `CICLO ${(cycle / 1000).toFixed(1).replace('.', ',')} S` : '';
+    const footerParts = [
+        `VER ${data.version}`,
+        `NODE ${data.nodeVersion}`,
+        cycleText,
+        `UPTIME ${data.uptime.toUpperCase()}`
+    ].filter(part => part !== '');
     const footerAvailable = contentWidth - controlWidth - 24;
     let cursorX = PAD;
     for (const part of footerParts) {
@@ -917,5 +1046,7 @@ ${getFontFacesCss()}
 ${svg}
 </svg>`;
 
-    return sharp(Buffer.from(svgDocument), { density: DENSITY }).png({ compressionLevel: 9 }).toBuffer();
+    return sharp(Buffer.from(svgDocument), { density: DENSITY })
+        .webp({ lossless: true, effort: WEBP_EFFORT })
+        .toBuffer();
 }

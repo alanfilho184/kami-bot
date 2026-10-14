@@ -9,8 +9,12 @@ import os from 'os-utils';
 import logger from '../configs/logger';
 import { localization } from '../resources/localization';
 import { Available_Languages } from '../types/enums';
-import { renderStatusImage } from '../resources/utils/status-image';
+import { renderStatusImage, STATUS_IMAGE_EXTENSION, STATUS_IMAGE_MIME } from '../resources/utils/status-image';
+import metrics from '../resources/utils/metrics';
+import { measureClockOffset as probeClockOffset } from '../resources/utils/clock-offset';
 import { performance } from 'node:perf_hooks';
+
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 class BotStatus {
     statusMessageId: string | null = null;
@@ -45,11 +49,18 @@ class BotStatus {
             }, ms('10m'))
         );
 
+        void this.measureClockOffset();
+        this.timers.push(
+            setInterval(() => {
+                void this.measureClockOffset();
+            }, ms('10m'))
+        );
+
         void this.getDiscordData();
         this.timers.push(
             setInterval(() => {
                 void this.getDiscordData();
-            }, ms('1h'))
+            }, ms('10m'))
         );
 
         this.timers.push(
@@ -293,21 +304,79 @@ class BotStatus {
         };
     }
 
-    async getDiscordData() {
-        let pingStart = Date.now();
-        const applicationPartial = (await rest.get(Routes.currentApplication())) as {
-            approximate_guild_count: number;
-            approximate_user_install_count: number;
-            approximate_user_authorization_count: number;
-        };
-        let pingEnd = Date.now();
+    /**
+     * Dados da aplicação (servidores, instalações) + latência de ida e volta
+     * até a borda do Discord, medida na mesma rota.
+     *
+     * Uma amostra isolada mistura DNS, handshake TLS, reuso de keep-alive e
+     * ruído de event loop, então tiramos algumas amostras e ficamos com a
+     * mediana - `performance.now()` é monotônico e não sofre com degrau de NTP.
+     * A primeira amostra é a chamada que já precisava acontecer para bring os
+     * contadores, o resto é preenchido com chamadas extras à mesma rota.
+     */
+    async getDiscordData(samples: number = 2): Promise<void> {
+        const times: number[] = [];
 
-        this.discordData = {
-            approximateGuildCount: applicationPartial.approximate_guild_count,
-            approximateUserInstallCount: applicationPartial.approximate_user_install_count,
-            approximateUserAuthorizationCount: applicationPartial.approximate_user_authorization_count,
-            restPing: pingEnd - pingStart
-        };
+        try {
+            const startedAt = performance.now();
+            const applicationPartial = (await rest.get(Routes.currentApplication())) as {
+                approximate_guild_count: number;
+                approximate_user_install_count: number;
+                approximate_user_authorization_count: number;
+            };
+            times.push(performance.now() - startedAt);
+
+            for (let i = 1; i < samples; i++) {
+                await sleep(1000);
+                const extraStartedAt = performance.now();
+                try {
+                    await rest.get(Routes.currentApplication());
+                    times.push(performance.now() - extraStartedAt);
+                } catch {
+                    // ignora a amostra: chamada falhou
+                }
+            }
+
+            times.sort((a, b) => a - b);
+
+            this.discordData = {
+                ...(this.discordData ?? {}),
+                approximateGuildCount: applicationPartial.approximate_guild_count,
+                approximateUserInstallCount: applicationPartial.approximate_user_install_count,
+                approximateUserAuthorizationCount: applicationPartial.approximate_user_authorization_count,
+                apiLatency: times.length > 0 ? times[Math.floor(times.length / 2)] : 0
+            };
+        } catch (err) {
+            logger.logText('ERROR', err);
+        }
+    }
+
+    private lastClockProbeAt = 0;
+
+    /**
+     * Mede o desvio do relógio do sistema e aplica na métrica de entrada.
+     *
+     * A sonda só LÊ o offset (w32tm no Windows; chrony/timedatectl/adjtimex
+     * no Linux) — ela jamais ajusta o relógio. Se falhar, o card segue
+     * mostrando o estado de dessincronia quando o delta bruto é implausível.
+     */
+    async measureClockOffset(): Promise<void> {
+        if (process.env.CLOCK_OFFSET_ENABLED === 'false') return;
+        if (this.lastClockProbeAt !== 0 && Date.now() - this.lastClockProbeAt < ms('5m')) return;
+        this.lastClockProbeAt = Date.now();
+
+        const result = await probeClockOffset();
+        if (!result) return;
+
+        metrics.setClockOffset(result.offsetMs, result.source);
+
+        if (Math.abs(result.offsetMs) >= 10) {
+            logger.logText(
+                'INFO',
+                `Relógio local com desvio de ${Math.round(result.offsetMs)} ms (fonte: ${result.source}). ` +
+                    'O valor está sendo corrigido na métrica de latência de entrada.'
+            );
+        }
     }
 
     async buildStatusImage(): Promise<Buffer> {
@@ -377,7 +446,12 @@ class BotStatus {
             memory: Number(stats.memory.toFixed(2)),
             ramUsedGb: Number(ramUsedGb.toFixed(1)),
             ramTotalGb: Number(ramTotalGb.toFixed(1)),
-            restPing: Number(this.discordData?.restPing || 0),
+            restPing: Number(this.discordData?.apiLatency || 0),
+            ingressLatency: metrics.ingress,
+            clockOffsetMs: metrics.hasFreshClockOffset ? metrics.clockOffsetMs : null,
+            cycleMs: Number(this.discordData?.cycleMs || 0),
+            encodeMs: Number(this.discordData?.encodeMs || 0),
+            uploadMs: Number(this.discordData?.uploadMs || 0),
             dbPing: Number(this.dbData?.dbPing || 0),
             uptime: botuptime,
             guildCount: Number(this.discordData?.approximateGuildCount || 0),
@@ -468,9 +542,13 @@ class BotStatus {
 
                 try {
                     const isBackup = this.isRunningOnBackup;
+
+                    const encodeStartedAt = performance.now();
                     const image = await this.buildStatusImage();
+                    const encodeMs = performance.now() - encodeStartedAt;
+
                     // Nome único a cada ciclo para evitar cache antigo da CDN do Discord
-                    const fileName = `kami-status-${Math.floor(Date.now() / 60000)}.png`;
+                    const fileName = `kami-status-${Math.floor(Date.now() / 60000)}.${STATUS_IMAGE_EXTENSION}`;
 
                     const botStatusEmbed = new EmbedBuilder();
                     botStatusEmbed.setColor(isBackup ? 0xff9900 : Number(config.EMBED_COLOR));
@@ -489,7 +567,7 @@ class BotStatus {
                         ])
                     });
 
-                    const pingStart = Date.now();
+                    const uploadStartedAt = performance.now();
                     await rest.patch(
                         Routes.channelMessage(
                             config.BOT_STATUS_CHANNEL_ID.channel_id,
@@ -504,14 +582,19 @@ class BotStatus {
                                 {
                                     name: fileName,
                                     data: image,
-                                    contentType: 'image/png'
+                                    contentType: STATUS_IMAGE_MIME
                                 }
                             ]
                         }
                     );
-                    const pingEnd = Date.now();
 
-                    this.discordData.restPing = pingEnd - pingStart;
+                    const uploadMs = performance.now() - uploadStartedAt;
+                    this.discordData = {
+                        ...(this.discordData ?? {}),
+                        encodeMs,
+                        uploadMs,
+                        cycleMs: encodeMs + uploadMs
+                    };
                 } catch (err) {
                     logger.logText('ERROR', err);
                 } finally {
