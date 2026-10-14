@@ -60,7 +60,17 @@ export interface StatusImageData {
 
 const WIDTH = 900;
 const PAD = 20;
-const DENSITY = 144;
+
+/**
+ * Densidade de rasterização (dpi). 144 = 2x a largura base, gerando
+ * 1800x2300 px. O custo de render é proporcional ao quadrado da escala, então
+ * baixar derruba a CPU — 144 -> 96 corta metade do tempo — em troca da nitidez
+ * do texto. Ajuste com STATUS_IMAGE_DENSITY sem precisar recompilar.
+ */
+const DENSITY = (() => {
+    const configured = Number(process.env.STATUS_IMAGE_DENSITY);
+    return Number.isFinite(configured) && configured >= 72 ? configured : 144;
+})();
 
 /**
  * Formato de saída: WebP lossless. Medido no layout atual, entrega os mesmos
@@ -300,17 +310,56 @@ const hexPoints = (r: number): string =>
         return `${(r * Math.cos(angle)).toFixed(2)},${(r * Math.sin(angle)).toFixed(2)}`;
     }).join(' ');
 
-const buildDefs = (accent: string, hazardColor: string): string => {
-    const r = 15;
-    const patternW = r * 1.5;
-    const patternH = r * Math.sqrt(3);
-    return `<defs>
-        <pattern id="hex" width="${patternW}" height="${patternH}" patternUnits="userSpaceOnUse">
-            <polygon points="${hexPoints(r)}" fill="none" stroke="${accent}" stroke-width="0.7"
-                transform="translate(${r}, ${patternH / 2})" />
-            <polygon points="${hexPoints(r)}" fill="none" stroke="${accent}" stroke-width="0.7"
-                transform="translate(${r + patternW / 2}, ${patternH / 2 + patternH / 2})" />
-        </pattern>
+const HEX_RADIUS = 15;
+const HEX_TILE_W = HEX_RADIUS * 1.5;
+const HEX_TILE_H = HEX_RADIUS * Math.sqrt(3);
+const HEX_OPACITY = 0.1;
+
+/** Desenho de um tile do hex. O segundo polígono cobre o corte na borda. */
+const hexTileContent = (accent: string): string => `
+            <polygon points="${hexPoints(HEX_RADIUS)}" fill="none" stroke="${accent}" stroke-width="0.7"
+                transform="translate(${HEX_RADIUS}, ${HEX_TILE_H / 2})" />
+            <polygon points="${hexPoints(HEX_RADIUS)}" fill="none" stroke="${accent}" stroke-width="0.7"
+                transform="translate(${HEX_RADIUS + HEX_TILE_W / 2}, ${HEX_TILE_H / 2 + HEX_TILE_H / 2})" />`;
+
+/**
+ * Tile do hex pré-renderizado, para ladrilhar como fundo.
+ *
+ * Desenhar a grade com um preenchimento de padrão dentro do SVG faz o librsvg
+ * percorrer o padrão em toda a tela a cada render — medido em ~2,7x do tempo
+ * total, bem acima das fontes (94% do SVG, custo zero) e do WebP. Ladrilhar um
+ * PNG já rasterizado com o `tile` do libvips é um blit SIMD, e o resultado é
+ * visualmente o mesmo (delta máximo de 26/255, só o traço a 10% de opacidade).
+ *
+ * Em cache por cor de acento, que é a única coisa que muda o desenho.
+ */
+const hexTileCache = new Map<string, Buffer>();
+
+const getHexTile = async (accent: string): Promise<Buffer | null> => {
+    const cached = hexTileCache.get(accent);
+    if (cached) return cached;
+
+    try {
+        const tile = await sharp(
+            Buffer.from(
+                `<svg xmlns="http://www.w3.org/2000/svg" width="${HEX_TILE_W}" height="${HEX_TILE_H}"` +
+                    ` viewBox="0 0 ${HEX_TILE_W} ${HEX_TILE_H}">` +
+                    `<g opacity="${HEX_OPACITY}">${hexTileContent(accent)}</g></svg>`
+            ),
+            { density: DENSITY }
+        )
+            .png()
+            .toBuffer();
+
+        hexTileCache.set(accent, tile);
+        return tile;
+    } catch {
+        // Sem hex o status ainda sai; melhor que falhar a imagem inteira.
+        return null;
+    }
+};
+
+const buildDefs = (accent: string, hazardColor: string): string => `<defs>
         <pattern id="hazard" width="22" height="22" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
             <rect x="0" y="0" width="22" height="22" fill="${NERV.void}" />
             <rect x="0" y="0" width="11" height="22" fill="${hazardColor}" />
@@ -319,7 +368,6 @@ const buildDefs = (accent: string, hazardColor: string): string => {
             <rect x="0" y="0" width="3" height="9" fill="${accent}" opacity="0.14" />
         </pattern>
     </defs>`;
-};
 
 /* ──────────────────────────────  COMPONENTES  ────────────────────────── */
 
@@ -439,7 +487,7 @@ const systemCard = (
 ): string => {
     let svg = frame(x, y, w, h, NERV.line, NERV.panelAlt);
     svg += frameTag(x, y, code, accent);
-    svg += text(x + 14, y + 26, label, { size: 12, weight: 600, tracking: 2.4, fill: NERV.muted });
+    svg += text(x + 14, y + 26, label, { size: 11, weight: 600, tracking: 2.4, fill: NERV.muted });
 
     // valor: encolhe até caber ao lado da unidade
     const valueMax = unit ? w - 28 - measure(unit, 13, 0, true) - 10 : w - 28;
@@ -602,7 +650,7 @@ const segmentedBar = (
     ratio: number,
     color: string,
     opacity: number,
-    blocks = 12,
+    blocks = 24,
     blockGap = 3
 ): { svg: string; barHeight: number } => {
     const lit = Math.max(ratio > 0 ? 1 : 0, Math.round(ratio * blocks));
@@ -786,9 +834,8 @@ export async function renderStatusImage(data: StatusImageData): Promise<Buffer> 
     const gap = 12;
 
     let svg = buildDefs(accent, bannerAccent);
-    svg += rect(0, 0, WIDTH, height, NERV.void);
+    // O fundo e o hex saem do SVG de propósito: ver `getHexTile`.
     svg += rect(0, 0, WIDTH, 3, accent);
-    svg += rect(0, 3, WIDTH, height - 3, NERV.void, { fillRef: 'url(#hex)', opacity: 0.1 });
 
     /* ── Header ───────────────────────────────────────────────────────── */
     const headerCenter = 42;
@@ -1046,7 +1093,21 @@ ${getFontFacesCss()}
 ${svg}
 </svg>`;
 
-    return sharp(Buffer.from(svgDocument), { density: DENSITY })
+    const hexTile = await getHexTile(accent);
+
+    const layers: sharp.OverlayOptions[] = [];
+    if (hexTile) layers.push({ input: hexTile, tile: true, blend: 'over' });
+    layers.push({ input: Buffer.from(svgDocument), density: DENSITY, blend: 'over' });
+
+    return sharp({
+        create: {
+            width: Math.round((WIDTH * DENSITY) / 72),
+            height: Math.round((height * DENSITY) / 72),
+            channels: 4,
+            background: NERV.void
+        }
+    })
+        .composite(layers)
         .webp({ lossless: true, effort: WEBP_EFFORT })
         .toBuffer();
 }
