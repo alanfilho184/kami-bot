@@ -109,6 +109,12 @@ class BotStatus {
         const nowFt = DateTime.now().setZone(fortaleza);
         const todayStartUtc = nowFt.startOf('day').toUTC();
         const yesterdayStartUtc = todayStartUtc.minus({ days: 1 });
+        // Momento do dia em ms desde a meia-noite. Corta o dia anterior no mesmo
+        // ponto para a variação diária comparar "hoje até agora" com "ontem até
+        // a mesma hora", e não com o dia inteiro. Fortaleza é UTC-3 fixo (sem
+        // horário de verão desde 2012), então não há degrau a considerar.
+        const elapsedTodayMs = nowFt.diff(nowFt.startOf('day'), 'milliseconds').milliseconds;
+        const yesterdayCutoffUtc = yesterdayStartUtc.plus({ milliseconds: elapsedTodayMs });
         const weekStartUtc = nowFt.startOf('week').toUTC();
         const weekPrevStartUtc = weekStartUtc.minus({ weeks: 1 });
         const weekEndUtc = weekStartUtc.plus({ weeks: 1 });
@@ -118,6 +124,7 @@ class BotStatus {
         const fmt = (dt: DateTime) => dt.toFormat('yyyy-MM-dd HH:mm:ss.SSS');
         const T_TODAY = fmt(todayStartUtc);
         const T_YESTERDAY = fmt(yesterdayStartUtc);
+        const T_YESTERDAY_CUTOFF = fmt(yesterdayCutoffUtc);
         const T_WEEK_START = fmt(weekStartUtc);
         const T_WEEK_PREV_START = fmt(weekPrevStartUtc);
         const T_WEEK_END = fmt(weekEndUtc);
@@ -147,6 +154,20 @@ class BotStatus {
                                 AND timestamp >= '${T_YESTERDAY}'::timestamp
                                 AND timestamp < '${T_TODAY}'::timestamp THEN 1
                                 END) AS total_components_prev_24h,
+
+                            -- dia anterior cortado no mesmo horário de hoje, usado
+                            -- só na variação diária; a linha ONTEM do painel
+                            -- continua usando o dia inteiro acima
+                            COUNT(CASE
+                                WHEN action_type = 'COMMAND'
+                                AND timestamp >= '${T_YESTERDAY}'::timestamp
+                                AND timestamp < '${T_YESTERDAY_CUTOFF}'::timestamp THEN 1
+                                END) AS total_commands_prev_day_to_date,
+                            COUNT(CASE
+                                WHEN action_type = 'COMPONENT'
+                                AND timestamp >= '${T_YESTERDAY}'::timestamp
+                                AND timestamp < '${T_YESTERDAY_CUTOFF}'::timestamp THEN 1
+                                END) AS total_components_prev_day_to_date,
                             COUNT(CASE 
                                 WHEN action_type = 'COMMAND' AND timestamp >= '${T_WEEK_START}'::timestamp THEN 1 
                                 END) AS total_commands_7d,
@@ -204,14 +225,14 @@ class BotStatus {
                         FROM
                             logs
                     ),
-                    weekly_days AS (
+                    daily_days AS (
                         SELECT
                             ((timestamp AT TIME ZONE 'UTC') AT TIME ZONE 'America/Fortaleza')::date AS day,
                             COUNT(*) AS total
                         FROM
                             logs
                         WHERE
-                            timestamp >= '${T_WEEK_PREV_START}'::timestamp
+                            timestamp >= '${T_PREV_MONTH_START}'::timestamp
                             AND timestamp < '${T_WEEK_END}'::timestamp
                         GROUP BY
                             1
@@ -228,6 +249,8 @@ class BotStatus {
                         l.total_components_24h AS total_components_today,
                         l.total_commands_prev_24h AS total_commands_prev_day,
                         l.total_components_prev_24h AS total_components_prev_day,
+                        l.total_commands_prev_day_to_date AS total_commands_prev_day_to_date,
+                        l.total_components_prev_day_to_date AS total_components_prev_day_to_date,
                         l.total_commands_7d AS total_commands_week,
                         l.total_components_7d AS total_components_week,
                         l.total_commands_prev_7d AS total_commands_prev_week,
@@ -239,7 +262,7 @@ class BotStatus {
                         l.total_components_prev_month AS total_components_prev_month,
 
                         (SELECT COALESCE(json_agg(json_build_object('day', day, 'total', total) ORDER BY day), '[]'::json)
-                         FROM weekly_days) AS weekly_usage
+                         FROM daily_days) AS daily_usage
                     FROM
                         log_metrics l
                     CROSS JOIN
@@ -255,6 +278,8 @@ class BotStatus {
                 total_components_today: number;
                 total_commands_prev_day: number;
                 total_components_prev_day: number;
+                total_commands_prev_day_to_date: number;
+                total_components_prev_day_to_date: number;
                 total_commands_week: number;
                 total_components_week: number;
                 total_commands_prev_week: number;
@@ -263,21 +288,21 @@ class BotStatus {
                 total_components_month: number;
                 total_commands_prev_month: number;
                 total_components_prev_month: number;
-                weekly_usage: { day: string; total: number }[] | string;
+                daily_usage: { day: string; total: number }[] | string;
             }[]
         )[0];
         let pingEnd = Date.now();
 
-        let weeklyUsage: { day: string; total: number }[] = [];
-        const rawWeeklyUsage = data?.weekly_usage;
-        if (Array.isArray(rawWeeklyUsage)) {
-            weeklyUsage = rawWeeklyUsage as { day: string; total: number }[];
-        } else if (typeof rawWeeklyUsage === 'string') {
+        let dailyUsage: { day: string; total: number }[] = [];
+        const rawDailyUsage = data?.daily_usage;
+        if (Array.isArray(rawDailyUsage)) {
+            dailyUsage = rawDailyUsage as { day: string; total: number }[];
+        } else if (typeof rawDailyUsage === 'string') {
             try {
-                const parsed = JSON.parse(rawWeeklyUsage);
-                if (Array.isArray(parsed)) weeklyUsage = parsed;
+                const parsed = JSON.parse(rawDailyUsage);
+                if (Array.isArray(parsed)) dailyUsage = parsed;
             } catch {
-                weeklyUsage = [];
+                dailyUsage = [];
             }
         }
 
@@ -291,6 +316,8 @@ class BotStatus {
             totalComponentsToday: Number(data.total_components_today),
             totalCommandsPrevDay: Number(data.total_commands_prev_day),
             totalComponentsPrevDay: Number(data.total_components_prev_day),
+            totalCommandsPrevDayToDate: Number(data.total_commands_prev_day_to_date),
+            totalComponentsPrevDayToDate: Number(data.total_components_prev_day_to_date),
             totalCommandsWeek: Number(data.total_commands_week),
             totalComponentsWeek: Number(data.total_components_week),
             totalCommandsPrevWeek: Number(data.total_commands_prev_week),
@@ -299,7 +326,7 @@ class BotStatus {
             totalComponentsMonth: Number(data.total_components_month),
             totalCommandsPrevMonth: Number(data.total_commands_prev_month),
             totalComponentsPrevMonth: Number(data.total_components_prev_month),
-            weeklyUsage: weeklyUsage,
+            dailyUsage: dailyUsage,
             dbPing: pingEnd - pingStart
         };
     }
@@ -395,6 +422,11 @@ class BotStatus {
             Number(this.dbData?.totalCommandsToday || 0) + Number(this.dbData?.totalComponentsToday || 0);
         const totalInteractionsPrevDay =
             Number(this.dbData?.totalCommandsPrevDay || 0) + Number(this.dbData?.totalComponentsPrevDay || 0);
+        // Ontem cortado no mesmo horário de hoje, para a variação não comparar
+        // um dia parcial com o dia inteiro.
+        const totalInteractionsPrevDayToDate =
+            Number(this.dbData?.totalCommandsPrevDayToDate || 0) +
+            Number(this.dbData?.totalComponentsPrevDayToDate || 0);
         const totalInteractionsWeek =
             Number(this.dbData?.totalCommandsWeek || 0) + Number(this.dbData?.totalComponentsWeek || 0);
         const totalInteractionsPrevWeek =
@@ -412,20 +444,12 @@ class BotStatus {
             return `↓ ${Math.abs(growth).toFixed(2)} %`;
         };
 
-        const dailyGrowth = formatGrowth(totalInteractionsDay, totalInteractionsPrevDay);
-        const weeklyGrowth = formatGrowth(totalInteractionsWeek, totalInteractionsPrevWeek);
-        const monthlyGrowth = formatGrowth(totalInteractionsMonth, totalInteractionsPrevMonth);
-
-        // os-utils já devolve MB, então /1024 converte para GB
-        const ramTotalGb = os.totalmem() / 1024;
-        const ramUsedGb = os.totalmem() / 1024 - os.freemem() / 1024;
-        const accentColor = Number(config.EMBED_COLOR);
-
+        const nowFt = DateTime.now().setZone('America/Fortaleza');
+        const today = nowFt;
+        const weekStart = nowFt.startOf('week');
         const weekLabels = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
-        const weekStart = DateTime.now().setZone('America/Fortaleza').startOf('week');
-        const today = DateTime.now().setZone('America/Fortaleza');
         const usageByDay = new Map<string, number>(
-            (Array.isArray(this.dbData?.weeklyUsage) ? this.dbData.weeklyUsage : []).map((entry: any) => [
+            (Array.isArray(this.dbData?.dailyUsage) ? this.dbData.dailyUsage : []).map((entry: any) => [
                 String(entry?.day),
                 Number(entry?.total || 0)
             ])
@@ -440,6 +464,53 @@ class BotStatus {
                 isToday: day.hasSame(today, 'day')
             };
         });
+
+        /**
+         * Compara períodos equivalentes, nunca um trecho contra um período
+         * inteiro:
+         *
+         * - diária: hoje até agora contra ontem até a MESMA hora;
+         * - semanal: os N dias decorridos contra os N dias da semana passada;
+         * - mensal: os N dias decorridos contra os N dias do mês passado.
+         *
+         * Sem isso a variação mede o tamanho da janela em vez da tendência, e
+         * por isso aparece negativa quase sempre (1 dia contra 7, 1 contra 31).
+         */
+        // `diff` devolve fração de dia; o piso converte em "quantos dias já
+        // ocorreram", e o +1 inclui o dia de hoje (que está pela metade).
+        const elapsedDays = Math.floor(today.diff(weekStart, 'days').days) + 1;
+        const sumDays = (start: DateTime, days: number): number => {
+            let total = 0;
+            for (let offset = 0; offset < days; offset++) {
+                total += usageByDay.get(start.plus({ days: offset }).toFormat('yyyy-MM-dd')) ?? 0;
+            }
+            return total;
+        };
+
+        const monthStart = nowFt.startOf('month');
+        const prevMonthStart = monthStart.minus({ months: 1 });
+        // Se o mês corrente já passou do tamanho do anterior (31 de março contra
+        // 28 de fevereiro), o recorte é limitado para comparar o mesmo número
+        // de dias nos dois.
+        const alignedMonthDays = Math.min(
+            Math.floor(nowFt.diff(monthStart, 'days').days) + 1,
+            prevMonthStart.daysInMonth ?? 31
+        );
+
+        const dailyGrowth = formatGrowth(totalInteractionsDay, totalInteractionsPrevDayToDate);
+        const weeklyGrowth = formatGrowth(
+            sumDays(weekStart, elapsedDays),
+            sumDays(weekStart.minus({ weeks: 1 }), elapsedDays)
+        );
+        const monthlyGrowth = formatGrowth(
+            sumDays(monthStart, alignedMonthDays),
+            sumDays(prevMonthStart, alignedMonthDays)
+        );
+
+        // os-utils já devolve MB, então /1024 converte para GB
+        const ramTotalGb = os.totalmem() / 1024;
+        const ramUsedGb = os.totalmem() / 1024 - os.freemem() / 1024;
+        const accentColor = Number(config.EMBED_COLOR);
 
         return renderStatusImage({
             cpu: Number(stats.cpu),
