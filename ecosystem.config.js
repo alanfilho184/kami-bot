@@ -5,6 +5,7 @@ module.exports = {
             script: './dist/app.js',
             exec_mode: 'fork',
             env: {
+                NODE_ENV: 'production',
                 LD_PRELOAD: '/lib/x86_64-linux-gnu/libjemalloc.so.2'
             }
         }

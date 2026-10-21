@@ -32,6 +32,16 @@ declare global {
         INSTANCE_TYPE: 'primary' | 'backup';
         PRIMARY_INSTANCE_STATUS_URL?: string;
         PRIMARY_INSTANCE_API_TOKEN?: string;
+        CLOUDFLARE_API_TOKEN?: string;
+        CLOUDFLARE_ZONE_ID?: string;
+        CLOUDFLARE_DNS_RECORD_NAME?: string;
+        CLOUDFLARE_DNS_PRIMARY_TYPE?: 'A' | 'AAAA' | 'CNAME';
+        CLOUDFLARE_DNS_PRIMARY_CONTENT?: string;
+        CLOUDFLARE_DNS_PRIMARY_PROXIED?: boolean;
+        CLOUDFLARE_DNS_BACKUP_TYPE?: 'A' | 'AAAA' | 'CNAME';
+        CLOUDFLARE_DNS_BACKUP_CONTENT?: string;
+        CLOUDFLARE_DNS_BACKUP_PROXIED?: boolean;
+        CLOUDFLARE_DNS_TTL?: number;
     };
 
     interface Logger {

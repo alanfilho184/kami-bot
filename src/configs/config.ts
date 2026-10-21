@@ -39,6 +39,18 @@ const config: EnvVars = {
 if (config.INSTANCE_TYPE === 'backup') {
     config.PRIMARY_INSTANCE_STATUS_URL = process.env.PRIMARY_INSTANCE_STATUS_URL as string;
     config.PRIMARY_INSTANCE_API_TOKEN = process.env.PRIMARY_INSTANCE_API_TOKEN as string;
+
+    // Cloudflare DNS failover
+    config.CLOUDFLARE_API_TOKEN = process.env.CLOUDFLARE_API_TOKEN;
+    config.CLOUDFLARE_ZONE_ID = process.env.CLOUDFLARE_ZONE_ID;
+    config.CLOUDFLARE_DNS_RECORD_NAME = process.env.CLOUDFLARE_DNS_RECORD_NAME;
+    config.CLOUDFLARE_DNS_PRIMARY_TYPE = process.env.CLOUDFLARE_DNS_PRIMARY_TYPE as 'A' | 'AAAA' | 'CNAME' | undefined;
+    config.CLOUDFLARE_DNS_PRIMARY_CONTENT = process.env.CLOUDFLARE_DNS_PRIMARY_CONTENT;
+    config.CLOUDFLARE_DNS_PRIMARY_PROXIED = process.env.CLOUDFLARE_DNS_PRIMARY_PROXIED !== 'false';
+    config.CLOUDFLARE_DNS_BACKUP_TYPE = process.env.CLOUDFLARE_DNS_BACKUP_TYPE as 'A' | 'AAAA' | 'CNAME' | undefined;
+    config.CLOUDFLARE_DNS_BACKUP_CONTENT = process.env.CLOUDFLARE_DNS_BACKUP_CONTENT;
+    config.CLOUDFLARE_DNS_BACKUP_PROXIED = process.env.CLOUDFLARE_DNS_BACKUP_PROXIED !== 'false';
+    config.CLOUDFLARE_DNS_TTL = Number(process.env.CLOUDFLARE_DNS_TTL) || 60;
 }
 
 export default config;

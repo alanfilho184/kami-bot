@@ -1,6 +1,6 @@
 {
     "name": "kami-bot-http",
-    "version": "5.1.14",
+    "version": "5.2.0",
     "main": "server.js",
     "scripts": {
         "start": "node dist/app.js",
@@ -9,7 +9,10 @@
         "test:coverage": "jest -w 16 --forceExit --coverage",
         "build": "tsc && node scripts/copy-assets.js",
         "build-start": "npm run build && npm run start",
-        "build-test": "npm run build && npm run test"
+        "build-test": "npm run build && npm run test",
+        "dns:status": "node scripts/dns-switch.js status",
+        "dns:primary": "node scripts/dns-switch.js primary",
+        "dns:backup": "node scripts/dns-switch.js backup"
     },
     "keywords": [
         "rpg",
@@ -54,7 +57,7 @@
         "@types/luxon": "^3.4.2",
         "@types/ms": "^0.7.34",
         "@types/node": "^22.9.0",
-        "jest": "^30.5.1",
+        "jest": "^30.5.2",
         "supertest": "^7.2.2",
         "typescript": "^7.0.2"
     }
