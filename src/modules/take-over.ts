@@ -264,7 +264,11 @@ class TakeOver {
         }
 
         if (result.changed) {
-            logger.logText('INFO', `DNS failover: ${recordName} -> ${target} (${result.action})`);
+            logger.logText(
+                'WARN',
+                `DNS switch: ${recordName} -> ${result.desired.content} (${target}, ${result.action})`,
+                true
+            );
         }
     }
 
