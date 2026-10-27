@@ -1,9 +1,11 @@
+import { FAILOVER_ORDER, type InstanceRole } from '../types/instance';
+
 const API_BASE = 'https://api.cloudflare.com/client/v4';
 const REQUEST_TIMEOUT = 15_000;
 const MAX_ATTEMPTS = 3;
 const RETRY_DELAYS = [2_000, 5_000];
 
-export type DnsTarget = 'primary' | 'backup';
+export type DnsTarget = InstanceRole;
 export type DnsRecordType = 'A' | 'AAAA' | 'CNAME';
 
 export type DnsRecordConfig = {
@@ -17,7 +19,7 @@ export type CloudflareDnsOptions = {
     zoneId: string;
     recordName: string;
     ttl?: number;
-    targets: Record<DnsTarget, DnsRecordConfig>;
+    targets: Partial<Record<DnsTarget, DnsRecordConfig>>;
 };
 
 export type DnsRecord = {
@@ -84,13 +86,20 @@ export class CloudflareDns {
     }
 
     get isConfigured(): boolean {
+        const targets = this.options.targets;
+
         return Boolean(
             this.options.apiToken &&
             this.options.zoneId &&
             this.options.recordName &&
-            this.isValidTarget(this.options.targets?.primary) &&
-            this.isValidTarget(this.options.targets?.backup)
+            this.isValidTarget(targets?.primary) &&
+            this.isValidTarget(targets?.secondary) &&
+            (!targets?.backup || this.isValidTarget(targets.backup))
         );
+    }
+
+    public hasTarget(target: DnsTarget): boolean {
+        return this.isValidTarget(this.options.targets?.[target]);
     }
 
     public apply(target: DnsTarget, options: DnsApplyOptions = {}): Promise<DnsApplyResult> {
@@ -99,6 +108,10 @@ export class CloudflareDns {
 
     public getRecords(): Promise<DnsRecord[]> {
         return this.enqueue(() => this.fetchRecords());
+    }
+
+    public getCurrentTarget(): Promise<DnsTarget | null> {
+        return this.enqueue(() => this.doGetCurrentTarget());
     }
 
     private enqueue<T>(operation: () => Promise<T>): Promise<T> {
@@ -282,6 +295,24 @@ export class CloudflareDns {
         }
     }
 
+    private async doGetCurrentTarget(): Promise<DnsTarget | null> {
+        if (!this.isConfigured) {
+            return null;
+        }
+
+        const records = await this.fetchRecords();
+
+        for (const target of FAILOVER_ORDER) {
+            const desired = this.options.targets?.[target];
+
+            if (desired && records.some(record => this.matches(record, desired))) {
+                return target;
+            }
+        }
+
+        return null;
+    }
+
     private async findDesiredAfterFailure(desired: DnsRecordConfig): Promise<boolean> {
         const records = await this.fetchRecords().catch(() => []);
         return records.some(record => this.matches(record, desired));
@@ -351,8 +382,8 @@ export class CloudflareDns {
             });
         } catch (err) {
             if (err instanceof CloudflareDnsError && err.status === 404) {
-            return;
-        }
+                return;
+            }
             throw err;
         }
     }

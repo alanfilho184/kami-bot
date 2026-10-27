@@ -5,7 +5,7 @@ import config from '../configs/config';
 const router = Router();
 
 router.get('/ping', (req: Request, res: Response) => {
-    res.status(200).json({ pong: true, timestamp: Date.now() });
+    res.status(200).json({ pong: true, instance_type: config.INSTANCE_TYPE, timestamp: Date.now() });
 });
 
 router.get('/status', async (req: Request, res: Response) => {

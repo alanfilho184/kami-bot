@@ -4,22 +4,40 @@ import ms from 'ms';
 import botPresence from './bot-presence';
 import botStatus from './bot-status';
 import CloudflareDns from './cloudflare-dns';
-import type { DnsApplyResult, DnsTarget } from './cloudflare-dns';
+import type { DnsApplyResult, DnsRecordConfig, DnsTarget } from './cloudflare-dns';
 import { isAutomaticDnsEnabled } from './dns-policy';
+import {
+    higherPriorityRoles,
+    pickHandbackTarget,
+    type InstanceRole
+} from '../types/instance';
 import { ActivityType } from 'discord.js';
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
-// Exige 3 checks consecutivos com a primária online antes de devolver o DNS (~2-3 min com o loop de 1 min).
-const PRIMARY_ONLINE_SUCCESSES_REQUIRED = 3;
+// Exige 3 ciclos consecutivos com um peer de maior prioridade online antes
+// de devolver o DNS (~3 min com o loop de 1 min).
+const HANDOVER_SUCCESSES_REQUIRED = 3;
+
+// Mesmo comportamento do modelo anterior: 3 novas checagens, 10s entre elas,
+// antes de assumir.
+const TAKEOVER_CHECKS_REQUIRED = 3;
+const TAKEOVER_RETRY_DELAY = ms('10s');
+const STATUS_TIMEOUT = ms('15s');
+
+type FailoverPeer = {
+    role: InstanceRole;
+    statusUrl?: string;
+    apiToken?: string;
+};
 
 class TakeOver {
     public takingOver: boolean = false;
-    private canTakeOver: boolean = config.INSTANCE_TYPE === 'backup';
-    private maxRetryCount: number = 3;
-    private timeoutBeforeRetry: number = ms('10s');
-    private retryCount: number = 0;
-    private primaryOnlineSuccessCount: number = 0;
+    private readonly role: InstanceRole;
+    private readonly peers: FailoverPeer[];
+    private failoverEnabled: boolean;
+    private handoverSuccessCount: number = 0;
+    private handoverTarget: InstanceRole | null = null;
     private isChecking: boolean = false;
     private readonly automaticDnsEnabled: boolean = isAutomaticDnsEnabled(config.NODE_ENV);
     private dns: CloudflareDns | null = null;
@@ -28,10 +46,17 @@ class TakeOver {
     private dnsRetryDelay: number = ms('1m');
 
     constructor() {
+        this.role = config.INSTANCE_TYPE;
+        this.peers = this.buildPeers();
+        this.failoverEnabled =
+            this.role !== 'primary' &&
+            this.peers.every(peer => Boolean(peer.statusUrl && peer.apiToken));
+
         if (process.env.NODE_ENV === 'test') {
             return;
         }
 
+        this.logConfiguration();
         this.initializeDns();
 
         void this.initialize();
@@ -40,8 +65,41 @@ class TakeOver {
         }, ms('1m'));
     }
 
+    private get dnsTarget(): DnsTarget {
+        return this.role;
+    }
+
+    private buildPeers(): FailoverPeer[] {
+        return higherPriorityRoles(this.role).map(role => ({
+            role,
+            statusUrl: role === 'primary' ? config.PRIMARY_INSTANCE_STATUS_URL : config.SECONDARY_INSTANCE_STATUS_URL,
+            apiToken: role === 'primary' ? config.PRIMARY_INSTANCE_API_TOKEN : config.SECONDARY_INSTANCE_API_TOKEN
+        }));
+    }
+
+    private logConfiguration(): void {
+        if (this.role === 'primary') {
+            logger.logText('INFO', 'Failover role: primary (take-over disabled)');
+            return;
+        }
+
+        const monitored = this.peers.map(peer => peer.role).join(', ') || 'none';
+        logger.logText('INFO', `Failover role: ${this.role}; monitoring: ${monitored}`);
+
+        const missing = this.peers.filter(peer => !peer.statusUrl || !peer.apiToken);
+
+        if (missing.length > 0) {
+            logger.logText(
+                'ERROR',
+                `Automatic failover is disabled: missing status URL/token for ${missing
+                    .map(peer => peer.role)
+                    .join(', ')}`
+            );
+        }
+    }
+
     private initializeDns(): void {
-        if (!this.canTakeOver) {
+        if (!this.failoverEnabled) {
             return;
         }
 
@@ -54,76 +112,180 @@ class TakeOver {
             return;
         }
 
+        const targets: Partial<Record<DnsTarget, DnsRecordConfig>> = {
+            primary: {
+                type: config.CLOUDFLARE_DNS_PRIMARY_TYPE ?? 'CNAME',
+                content: config.CLOUDFLARE_DNS_PRIMARY_CONTENT ?? '',
+                proxied: config.CLOUDFLARE_DNS_PRIMARY_PROXIED ?? true
+            },
+            secondary: {
+                type: config.CLOUDFLARE_DNS_SECONDARY_TYPE ?? 'CNAME',
+                content: config.CLOUDFLARE_DNS_SECONDARY_CONTENT ?? '',
+                proxied: config.CLOUDFLARE_DNS_SECONDARY_PROXIED ?? true
+            }
+        };
+
+        if (config.CLOUDFLARE_DNS_BACKUP_CONTENT) {
+            targets.backup = {
+                type: config.CLOUDFLARE_DNS_BACKUP_TYPE ?? 'CNAME',
+                content: config.CLOUDFLARE_DNS_BACKUP_CONTENT,
+                proxied: config.CLOUDFLARE_DNS_BACKUP_PROXIED ?? true
+            };
+        }
+
         this.dns = new CloudflareDns({
             apiToken: config.CLOUDFLARE_API_TOKEN ?? '',
             zoneId: config.CLOUDFLARE_ZONE_ID ?? '',
             recordName: config.CLOUDFLARE_DNS_RECORD_NAME ?? '',
             ttl: config.CLOUDFLARE_DNS_TTL,
-            targets: {
-                primary: {
-                    type: config.CLOUDFLARE_DNS_PRIMARY_TYPE ?? 'CNAME',
-                    content: config.CLOUDFLARE_DNS_PRIMARY_CONTENT ?? '',
-                    proxied: config.CLOUDFLARE_DNS_PRIMARY_PROXIED ?? true
-                },
-                backup: {
-                    type: config.CLOUDFLARE_DNS_BACKUP_TYPE ?? 'CNAME',
-                    content: config.CLOUDFLARE_DNS_BACKUP_CONTENT ?? '',
-                    proxied: config.CLOUDFLARE_DNS_BACKUP_PROXIED ?? true
-                }
-            }
+            targets
         });
 
         if (!this.dns.isConfigured) {
-            logger.logText('ERROR', 'Cloudflare DNS failover is not configured; DNS will not be switched');
+            logger.logText(
+                'ERROR',
+                'Cloudflare DNS failover is not configured; automatic failover is disabled'
+            );
+            this.dns = null;
+            this.failoverEnabled = false;
+            return;
+        }
+
+        if (!this.dns.hasTarget(this.dnsTarget)) {
+            logger.logText(
+                'ERROR',
+                `DNS target for "${this.dnsTarget}" is not configured; automatic failover is disabled`
+            );
+            this.dns = null;
+            this.failoverEnabled = false;
         }
     }
 
     private async initialize(): Promise<void> {
+        if (!this.failoverEnabled) {
+            return;
+        }
+
         try {
-            await this.reconcileDns();
+            // Se o processo reiniciou no meio de um failover e o DNS já aponta
+            // para este host, reassume imediatamente em vez de esperar ~30s.
+            if (this.dns) {
+                const onlinePeers = await this.getOnlinePeers();
+                const current = await this.dns.getCurrentTarget();
+
+                if (onlinePeers.length === 0 && current === this.dnsTarget) {
+                    await this.takeOver();
+                    return;
+                }
+            }
+
             await this.decideOnTakeOver();
         } catch (err) {
             logger.logText('ERROR', `Failover initialization failed: ${this.errorMessage(err)}`);
         }
     }
 
-    private async reconcileDns(): Promise<void> {
-        if (!this.dns || !this.dns.isConfigured) {
+    private async decideOnTakeOver(): Promise<void> {
+        if (!this.failoverEnabled || this.isChecking) {
             return;
         }
 
+        this.isChecking = true;
+
         try {
-            const isPrimaryOnline = await this.checkPrimaryStatus();
-            if (!isPrimaryOnline) {
+            const onlinePeers = await this.getOnlinePeers();
+            const targetPeer = this.highestOnlinePeer(onlinePeers);
+
+            if (targetPeer) {
+                if (this.handoverTarget !== targetPeer.role) {
+                    this.handoverTarget = targetPeer.role;
+                    this.handoverSuccessCount = 0;
+                }
+
+                if (this.takingOver) {
+                    this.handoverSuccessCount++;
+
+                    if (this.handoverSuccessCount >= HANDOVER_SUCCESSES_REQUIRED) {
+                        await this.handOver(targetPeer);
+                    } else {
+                        logger.logText(
+                            'INFO',
+                            `Higher-priority instance ${targetPeer.role} is online (${this.handoverSuccessCount}/${HANDOVER_SUCCESSES_REQUIRED}); waiting before DNS handback`
+                        );
+                    }
+                } else {
+                    this.handoverSuccessCount = 0;
+                    await this.reconcilePassiveDns(onlinePeers);
+                }
+
                 return;
             }
 
-            const result = await this.dns.apply('primary');
-            this.handleDnsResult('primary', result);
+            this.handoverTarget = null;
+            this.handoverSuccessCount = 0;
 
-            if (result.ok) {
-                this.clearPendingDns();
-            } else {
-                this.scheduleDnsRetry('primary');
+            if (this.takingOver) {
+                await this.ensureDns(this.dnsTarget);
+                return;
             }
+
+            const isInternetConnected = await this.checkInternetConnection();
+
+            if (!isInternetConnected) {
+                return;
+            }
+
+            for (let attempt = 0; attempt < TAKEOVER_CHECKS_REQUIRED; attempt++) {
+                await sleep(TAKEOVER_RETRY_DELAY);
+
+                const retryOnlinePeers = await this.getOnlinePeers();
+
+                if (retryOnlinePeers.length > 0) {
+                    return;
+                }
+            }
+
+            await this.takeOver();
         } catch (err) {
-            logger.logText('ERROR', `DNS reconciliation failed: ${this.errorMessage(err)}`);
-            this.scheduleDnsRetry('primary');
+            logger.logText('ERROR', `Failover check failed: ${this.errorMessage(err)}`);
+        } finally {
+            this.isChecking = false;
         }
     }
 
-    private async checkPrimaryStatus(): Promise<boolean> {
+    private async getOnlinePeers(): Promise<FailoverPeer[]> {
+        const statuses = await Promise.all(
+            this.peers.map(async peer => ({
+                peer,
+                online: await this.checkPeer(peer)
+            }))
+        );
+
+        return statuses.filter(status => status.online).map(status => status.peer);
+    }
+
+    private highestOnlinePeer(onlinePeers: FailoverPeer[]): FailoverPeer | null {
+        const target = pickHandbackTarget(
+            this.role,
+            onlinePeers.map(peer => peer.role)
+        );
+
+        return target ? onlinePeers.find(peer => peer.role === target) ?? null : null;
+    }
+
+    private async checkPeer(peer: FailoverPeer): Promise<boolean> {
+        if (!peer.statusUrl || !peer.apiToken) {
+            return false;
+        }
+
         try {
-            const headers: Record<string, string> = { 'Cache-Control': 'no-cache' };
-
-            if (config.PRIMARY_INSTANCE_API_TOKEN) {
-                headers.Authorization = config.PRIMARY_INSTANCE_API_TOKEN;
-            }
-
-            const res = await fetch(config.PRIMARY_INSTANCE_STATUS_URL as string, {
+            const res = await fetch(peer.statusUrl, {
                 method: 'GET',
-                headers,
-                signal: AbortSignal.timeout(15000)
+                headers: {
+                    Authorization: peer.apiToken,
+                    'Cache-Control': 'no-cache'
+                },
+                signal: AbortSignal.timeout(STATUS_TIMEOUT)
             });
 
             if (res.status !== 200) {
@@ -138,7 +300,7 @@ class TakeOver {
                 return false;
             }
 
-            if (data?.instance_type && data.instance_type !== 'primary') {
+            if (data?.instance_type && data.instance_type !== peer.role) {
                 return false;
             }
 
@@ -148,80 +310,49 @@ class TakeOver {
         }
     }
 
-    private async decideOnTakeOver(): Promise<void> {
-        if (config.INSTANCE_TYPE === 'primary') {
+    /**
+     * Um host passivo só corrige o DNS quando o alvo atual não é um peer
+     * superior saudável. Se o alvo atual é um peer superior online (mesmo que
+     * não seja o de maior prioridade), quem está ativo cuida do handback.
+     */
+    private async reconcilePassiveDns(onlinePeers: FailoverPeer[]): Promise<void> {
+        if (!this.dns || !this.dns.isConfigured || onlinePeers.length === 0) {
             return;
         }
 
-        if (this.isChecking) {
-            return;
-        }
-        this.isChecking = true;
+        const targetPeer = onlinePeers[0];
 
         try {
-            this.retryCount = 0;
-            let isPrimaryOnline = await this.checkPrimaryStatus();
+            const current = await this.dns.getCurrentTarget();
 
-            if (isPrimaryOnline) {
-                if (this.takingOver) {
-                    this.primaryOnlineSuccessCount++;
-
-                    if (this.primaryOnlineSuccessCount >= PRIMARY_ONLINE_SUCCESSES_REQUIRED) {
-                        await this.handOver();
-                    } else {
-                        logger.logText(
-                            'INFO',
-                            `Primary is online (${this.primaryOnlineSuccessCount}/${PRIMARY_ONLINE_SUCCESSES_REQUIRED}); waiting before DNS handback`
-                        );
-                    }
-                } else {
-                    this.primaryOnlineSuccessCount = 0;
-                    await this.retryPendingDns('primary');
-                }
-            } else {
-                this.primaryOnlineSuccessCount = 0;
-
-                if (this.takingOver) {
-                    await this.retryPendingDns('backup');
-                    return;
-                }
-
-                const isInternetConnected = await this.checkInternetConnection();
-
-                if (isInternetConnected) {
-                    while (this.retryCount < this.maxRetryCount) {
-                        await sleep(this.timeoutBeforeRetry);
-
-                        isPrimaryOnline = await this.checkPrimaryStatus();
-
-                        if (isPrimaryOnline) {
-                            break;
-                        } else {
-                            this.retryCount++;
-                            continue;
-                        }
-                    }
-
-                    if (isPrimaryOnline === false) {
-                        if (this.takingOver === false) {
-                            await this.takeOver();
-                        }
-                    }
-                }
+            if (current === targetPeer.role) {
+                return;
             }
+
+            if (current && onlinePeers.some(peer => peer.role === current)) {
+                return;
+            }
+
+            await this.ensureDns(targetPeer.role);
         } catch (err) {
-            logger.logText('ERROR', `Failover check failed: ${this.errorMessage(err)}`);
-        } finally {
-            this.isChecking = false;
+            logger.logText('ERROR', `DNS reconciliation failed: ${this.errorMessage(err)}`);
         }
     }
 
-    private async retryPendingDns(target: DnsTarget): Promise<void> {
+    private async ensureDns(target: DnsTarget): Promise<void> {
         if (!this.dns || !this.dns.isConfigured) {
             return;
         }
 
-        if (this.pendingDnsTarget !== target || Date.now() < this.pendingDnsRetryAt) {
+        const isRetry = this.pendingDnsTarget === target && this.pendingDnsRetryAt > 0;
+
+        if (this.pendingDnsTarget !== target) {
+            this.pendingDnsTarget = target;
+            this.pendingDnsRetryAt = 0;
+            this.dnsRetryDelay = ms('1m');
+        }
+
+        if (Date.now() < this.pendingDnsRetryAt) {
             return;
         }
 
@@ -232,11 +363,11 @@ class TakeOver {
             if (result.ok) {
                 this.clearPendingDns();
             } else {
-                this.scheduleDnsRetry(target, true);
+                this.scheduleDnsRetry(target, isRetry);
             }
         } catch (err) {
-            logger.logText('ERROR', `DNS failover retry failed: ${this.errorMessage(err)}`);
-            this.scheduleDnsRetry(target, true);
+            logger.logText('ERROR', `DNS failover failed: ${this.errorMessage(err)}`);
+            this.scheduleDnsRetry(target, isRetry);
         }
     }
 
@@ -276,7 +407,7 @@ class TakeOver {
         try {
             const res = await fetch('https://cloudflare.com/cdn-cgi/trace', {
                 method: 'GET',
-                signal: AbortSignal.timeout(15000)
+                signal: AbortSignal.timeout(STATUS_TIMEOUT)
             });
 
             return res.ok;
@@ -285,14 +416,31 @@ class TakeOver {
         }
     }
 
+    private takeOverMessage(): string {
+        if (this.role === 'secondary') {
+            return 'Primary is offline, secondary is taking over';
+        }
+
+        return 'Primary and secondary are offline, backup is taking over';
+    }
+
+    private handOverMessage(targetPeer: FailoverPeer): string {
+        if (targetPeer.role === 'primary') {
+            return `Primary is back online, ${this.role} is handing over`;
+        }
+
+        return `Secondary is back online, ${this.role} is handing over`;
+    }
+
     private async takeOver(): Promise<void> {
-        if (!this.canTakeOver) {
+        if (!this.failoverEnabled) {
             return;
         }
 
-        logger.logText('ERROR', 'Primary is offline, backup is taking over');
+        logger.logText('ERROR', this.takeOverMessage());
         this.takingOver = true;
-        this.primaryOnlineSuccessCount = 0;
+        this.handoverSuccessCount = 0;
+        this.handoverTarget = null;
         void botPresence.enable({
             status: 'dnd',
             activities: [
@@ -304,49 +452,18 @@ class TakeOver {
         });
         botStatus.enable();
 
-        if (!this.dns || !this.dns.isConfigured) {
-            return;
-        }
-
-        try {
-            const result = await this.dns.apply('backup');
-            this.handleDnsResult('backup', result);
-
-            if (result.ok) {
-                this.clearPendingDns();
-            } else {
-                this.scheduleDnsRetry('backup');
-            }
-        } catch (err) {
-            logger.logText('ERROR', `DNS failover failed: ${this.errorMessage(err)}`);
-            this.scheduleDnsRetry('backup');
-        }
+        await this.ensureDns(this.dnsTarget);
     }
 
-    private async handOver(): Promise<void> {
-        logger.logText('ERROR', 'Primary is back online, backup is handing over');
+    private async handOver(targetPeer: FailoverPeer): Promise<void> {
+        logger.logText('ERROR', this.handOverMessage(targetPeer));
         this.takingOver = false;
-        this.primaryOnlineSuccessCount = 0;
+        this.handoverSuccessCount = 0;
+        this.handoverTarget = null;
         void botPresence.disable();
         botStatus.disable();
 
-        if (!this.dns || !this.dns.isConfigured) {
-            return;
-        }
-
-        try {
-            const result = await this.dns.apply('primary');
-            this.handleDnsResult('primary', result);
-
-            if (result.ok) {
-                this.clearPendingDns();
-            } else {
-                this.scheduleDnsRetry('primary');
-            }
-        } catch (err) {
-            logger.logText('ERROR', `DNS failover failed: ${this.errorMessage(err)}`);
-            this.scheduleDnsRetry('primary');
-        }
+        await this.ensureDns(targetPeer.role);
     }
 
     private errorMessage(error: unknown): string {

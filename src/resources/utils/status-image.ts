@@ -1,5 +1,6 @@
 import sharp from 'sharp';
 import { DateTime } from 'luxon';
+import type { InstanceRole } from '../../types/instance';
 import { getFontFacesCss, FONT_DISPLAY, FONT_MONO } from '../fonts';
 
 export interface StatusInteractionsRow {
@@ -53,6 +54,7 @@ export interface StatusImageData {
     version: string;
     nodeVersion: string;
     accent: string;
+    instanceType?: InstanceRole;
     banner?: StatusBanner | null;
 }
 
@@ -841,7 +843,11 @@ export async function renderStatusImage(data: StatusImageData): Promise<Buffer> 
     const headerCenter = 42;
     const nowFt = DateTime.now().setZone('America/Fortaleza');
     const subtitle = 'STATUS DE OPERAÇÃO // MONITORAMENTO EM TEMPO REAL';
-    const instanceLabel = data.banner ? 'BACKUP (FAILOVER)' : 'SERVIDOR PRIMÁRIO';
+    const instanceLabel = data.banner
+        ? data.instanceType === 'secondary'
+            ? 'SECUNDÁRIO (FAILOVER)'
+            : 'BACKUP (FAILOVER)'
+        : 'SERVIDOR PRIMÁRIO';
 
     // Limites do header: título à esquerda, placa de instância ao centro-direita
     // e bloco de data/hora encostado na borda direita.
@@ -1061,7 +1067,11 @@ export async function renderStatusImage(data: StatusImageData): Promise<Buffer> 
 
     /* ── Rodapé ───────────────────────────────────────────────────────── */
     svg += line(PAD, footerTop, contentWidth, 0, NERV.line);
-    const controlText = data.banner ? 'CONTROLE: SERVIDOR BACKUP' : 'CONTROLE: SERVIDOR PRIMÁRIO';
+    const controlText = data.banner
+        ? data.instanceType === 'secondary'
+            ? 'CONTROLE: SERVIDOR SECUNDÁRIO'
+            : 'CONTROLE: SERVIDOR BACKUP'
+        : 'CONTROLE: SERVIDOR PRIMÁRIO';
     const controlWidth = measure(controlText, 11, 0, true);
     const cycle = Number(data.cycleMs ?? 0);
     const cycleText = cycle > 0 ? `CICLO ${(cycle / 1000).toFixed(1).replace('.', ',')} S` : '';

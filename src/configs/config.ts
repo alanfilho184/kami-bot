@@ -1,5 +1,6 @@
 import dotenv from 'dotenv';
 import { Discord_Id, Channel_Id, Msg_Id } from '../types/validations';
+import { isInstanceRole, type InstanceRole } from '../types/instance';
 import process from 'node:process';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -13,6 +14,14 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 const packageJson = JSON.parse(readFileSync(path.join(process.cwd(), 'package.json'), { encoding: 'utf-8' }));
+
+const instanceType = process.env.INSTANCE_TYPE;
+
+if (!isInstanceRole(instanceType)) {
+    throw new Error(
+        `INSTANCE_TYPE inválido: ${instanceType ?? 'undefined'}. Use primary, secondary ou backup.`
+    );
+}
 
 const config: EnvVars = {
     NODE_ENV: process.env.NODE_ENV as 'development' | 'production' | 'test',
@@ -33,12 +42,14 @@ const config: EnvVars = {
     EMBED_COLOR: process.env.EMBED_COLOR as string,
     VERSION: packageJson.version || (process.env.version as string),
     API_TOKEN: process.env.API_TOKEN as string,
-    INSTANCE_TYPE: process.env.INSTANCE_TYPE as 'primary' | 'backup'
+    INSTANCE_TYPE: instanceType as InstanceRole
 };
 
-if (config.INSTANCE_TYPE === 'backup') {
+if (config.INSTANCE_TYPE !== 'primary') {
     config.PRIMARY_INSTANCE_STATUS_URL = process.env.PRIMARY_INSTANCE_STATUS_URL as string;
     config.PRIMARY_INSTANCE_API_TOKEN = process.env.PRIMARY_INSTANCE_API_TOKEN as string;
+    config.SECONDARY_INSTANCE_STATUS_URL = process.env.SECONDARY_INSTANCE_STATUS_URL as string;
+    config.SECONDARY_INSTANCE_API_TOKEN = process.env.SECONDARY_INSTANCE_API_TOKEN as string;
 
     // Cloudflare DNS failover
     config.CLOUDFLARE_API_TOKEN = process.env.CLOUDFLARE_API_TOKEN;
@@ -47,6 +58,13 @@ if (config.INSTANCE_TYPE === 'backup') {
     config.CLOUDFLARE_DNS_PRIMARY_TYPE = process.env.CLOUDFLARE_DNS_PRIMARY_TYPE as 'A' | 'AAAA' | 'CNAME' | undefined;
     config.CLOUDFLARE_DNS_PRIMARY_CONTENT = process.env.CLOUDFLARE_DNS_PRIMARY_CONTENT;
     config.CLOUDFLARE_DNS_PRIMARY_PROXIED = process.env.CLOUDFLARE_DNS_PRIMARY_PROXIED !== 'false';
+    config.CLOUDFLARE_DNS_SECONDARY_TYPE = process.env.CLOUDFLARE_DNS_SECONDARY_TYPE as
+        | 'A'
+        | 'AAAA'
+        | 'CNAME'
+        | undefined;
+    config.CLOUDFLARE_DNS_SECONDARY_CONTENT = process.env.CLOUDFLARE_DNS_SECONDARY_CONTENT;
+    config.CLOUDFLARE_DNS_SECONDARY_PROXIED = process.env.CLOUDFLARE_DNS_SECONDARY_PROXIED !== 'false';
     config.CLOUDFLARE_DNS_BACKUP_TYPE = process.env.CLOUDFLARE_DNS_BACKUP_TYPE as 'A' | 'AAAA' | 'CNAME' | undefined;
     config.CLOUDFLARE_DNS_BACKUP_CONTENT = process.env.CLOUDFLARE_DNS_BACKUP_CONTENT;
     config.CLOUDFLARE_DNS_BACKUP_PROXIED = process.env.CLOUDFLARE_DNS_BACKUP_PROXIED !== 'false';

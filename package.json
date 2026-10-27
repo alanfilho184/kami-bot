@@ -1,6 +1,6 @@
 {
     "name": "kami-bot-http",
-    "version": "5.2.1",
+    "version": "5.3.0",
     "main": "server.js",
     "scripts": {
         "start": "node dist/app.js",
@@ -12,6 +12,7 @@
         "build-test": "npm run build && npm run test",
         "dns:status": "node scripts/dns-switch.js status",
         "dns:primary": "node scripts/dns-switch.js primary",
+        "dns:secondary": "node scripts/dns-switch.js secondary",
         "dns:backup": "node scripts/dns-switch.js backup"
     },
     "keywords": [

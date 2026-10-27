@@ -27,6 +27,11 @@ function makeDns(overrides = {}) {
                 content: 'bot-primary.url.com.br',
                 proxied: true
             },
+            secondary: {
+                type: 'CNAME',
+                content: 'bot-secondary.url.com.br',
+                proxied: true
+            },
             backup: {
                 type: 'CNAME',
                 content: 'bot-backup.url.com.br',
@@ -46,8 +51,17 @@ const primaryRecord = {
     ttl: 1
 };
 
-const backupRecord = {
+const secondaryRecord = {
     id: 'record-2',
+    type: 'CNAME',
+    name: 'bot.url.com.br',
+    content: 'bot-secondary.url.com.br',
+    proxied: true,
+    ttl: 1
+};
+
+const backupRecord = {
+    id: 'record-3',
     type: 'CNAME',
     name: 'bot.url.com.br',
     content: 'bot-backup.url.com.br',
@@ -103,6 +117,26 @@ describe('CloudflareDns', () => {
         });
     });
 
+    it('faz PATCH de CNAME quando o alvo é o secondary', async () => {
+        globalThis.fetch
+            .mockResolvedValueOnce(makeResponse(envelope([primaryRecord])))
+            .mockResolvedValueOnce(makeResponse(envelope({ ...primaryRecord, content: 'bot-secondary.url.com.br' })));
+
+        const result = await makeDns().apply('secondary');
+
+        expect(result).toMatchObject({ ok: true, changed: true, action: 'patch' });
+        expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+
+        const [url, init] = globalThis.fetch.mock.calls[1];
+        expect(url).toContain('/dns_records/record-1');
+        expect(init.method).toBe('PATCH');
+        expect(JSON.parse(init.body)).toMatchObject({
+            content: 'bot-secondary.url.com.br',
+            proxied: true,
+            ttl: 1
+        });
+    });
+
     it('cria o registro quando não existe nenhum conflitante', async () => {
         globalThis.fetch
             .mockResolvedValueOnce(makeResponse(envelope([])))
@@ -143,6 +177,7 @@ describe('CloudflareDns', () => {
         const dns = makeDns({
             targets: {
                 primary: { type: 'A', content: '203.0.113.10', proxied: false },
+                secondary: { type: 'CNAME', content: 'bot-secondary.url.com.br', proxied: true },
                 backup: { type: 'CNAME', content: 'bot-backup.url.com.br', proxied: true }
             }
         });
@@ -175,6 +210,7 @@ describe('CloudflareDns', () => {
         const dns = makeDns({
             targets: {
                 primary: { type: 'A', content: '203.0.113.10', proxied: false },
+                secondary: { type: 'CNAME', content: 'bot-secondary.url.com.br', proxied: true },
                 backup: { type: 'CNAME', content: 'bot-backup.url.com.br', proxied: true }
             }
         });
@@ -260,10 +296,67 @@ describe('CloudflareDns', () => {
         const dns = makeDns({
             targets: {
                 primary: { type: 'CNAME', content: '', proxied: true },
+                secondary: { type: 'CNAME', content: 'bot-secondary.url.com.br', proxied: true },
                 backup: { type: 'CNAME', content: 'bot-backup.url.com.br', proxied: true }
             }
         });
 
         expect(dns.isConfigured).toBe(false);
+    });
+
+    it('aceita o modelo de 2 hosts sem o alvo de backup', () => {
+        const dns = makeDns({
+            targets: {
+                primary: { type: 'CNAME', content: 'bot-primary.url.com.br', proxied: true },
+                secondary: { type: 'CNAME', content: 'bot-secondary.url.com.br', proxied: true }
+            }
+        });
+
+        expect(dns.isConfigured).toBe(true);
+        expect(dns.hasTarget('primary')).toBe(true);
+        expect(dns.hasTarget('secondary')).toBe(true);
+        expect(dns.hasTarget('backup')).toBe(false);
+    });
+
+    it('identifica o papel ativo pelo registro atual', async () => {
+        globalThis.fetch.mockResolvedValue(makeResponse(envelope([secondaryRecord])));
+
+        await expect(makeDns().getCurrentTarget()).resolves.toBe('secondary');
+    });
+
+    it('respeita a ordem primary > secondary > backup ao identificar o alvo', async () => {
+        globalThis.fetch
+            .mockResolvedValueOnce(makeResponse(envelope([backupRecord])))
+            .mockResolvedValueOnce(makeResponse(envelope([secondaryRecord, backupRecord])))
+            .mockResolvedValueOnce(makeResponse(envelope([primaryRecord, secondaryRecord, backupRecord])));
+
+        const dns = makeDns();
+
+        await expect(dns.getCurrentTarget()).resolves.toBe('backup');
+        await expect(dns.getCurrentTarget()).resolves.toBe('secondary');
+        await expect(dns.getCurrentTarget()).resolves.toBe('primary');
+    });
+
+    it('retorna null quando o registro não corresponde a nenhum alvo', async () => {
+        globalThis.fetch.mockResolvedValue(
+            makeResponse(envelope([{ ...primaryRecord, content: 'outro.url.com.br' }]))
+        );
+
+        await expect(makeDns().getCurrentTarget()).resolves.toBeNull();
+    });
+
+    it('recusa aplicar um alvo que não está configurado', async () => {
+        const dns = makeDns({
+            targets: {
+                primary: { type: 'CNAME', content: 'bot-primary.url.com.br', proxied: true },
+                secondary: { type: 'CNAME', content: 'bot-secondary.url.com.br', proxied: true }
+            }
+        });
+
+        const result = await dns.apply('backup');
+
+        expect(result).toMatchObject({ ok: false, changed: false, action: 'noop' });
+        expect(result.error).toContain('Unknown DNS target');
+        expect(globalThis.fetch).not.toHaveBeenCalled();
     });
 });

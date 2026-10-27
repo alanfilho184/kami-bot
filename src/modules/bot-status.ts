@@ -26,9 +26,9 @@ class BotStatus {
     private updating: boolean = false;
 
     // Só existe status quando a instância está no controle: primária sempre,
-    // backup apenas depois de assumir (failover) - ver modules/take-over.ts
-    get isRunningOnBackup(): boolean {
-        return config.INSTANCE_TYPE === 'backup';
+    // secondary/backup apenas depois de assumir (failover) - ver modules/take-over.ts
+    get isContingency(): boolean {
+        return config.INSTANCE_TYPE !== 'primary';
     }
 
     get isActive(): boolean {
@@ -586,14 +586,23 @@ class BotStatus {
                 Number.isFinite(accentColor) && accentColor >= 0
                     ? '#' + (accentColor >>> 0).toString(16).padStart(6, '0').slice(-6)
                     : '#0082ff',
-            banner: this.isRunningOnBackup
-                ? {
-                      text: 'MODO BACKUP ATIVO',
-                      detail: 'O servidor primário está offline, o servidor de backup assumiu o controle.',
-                      // severidade "warning" do design NERV
-                      color: '#FF9900',
-                      accent: '#FF9900'
-                  }
+            instanceType: config.INSTANCE_TYPE,
+            banner: this.isContingency
+                ? config.INSTANCE_TYPE === 'secondary'
+                    ? {
+                          text: 'MODO SECUNDÁRIO ATIVO',
+                          detail: 'O servidor primário está offline, o servidor secundário assumiu o controle.',
+                          // severidade "warning" do design NERV
+                          color: '#FF9900',
+                          accent: '#FF9900'
+                      }
+                    : {
+                          text: 'MODO BACKUP ATIVO',
+                          detail: 'Os servidores primário e secundário estão offline, o servidor de backup assumiu o controle.',
+                          // severidade "warning" do design NERV
+                          color: '#FF9900',
+                          accent: '#FF9900'
+                      }
                 : null
         });
     }
@@ -612,7 +621,13 @@ class BotStatus {
                 this.updating = true;
 
                 try {
-                    const isBackup = this.isRunningOnBackup;
+                    const isContingency = this.isContingency;
+                    const roleTitle =
+                        config.INSTANCE_TYPE === 'secondary' ? 'Servidor Secundário' : 'Servidor de Backup';
+                    const contingencyMessage =
+                        config.INSTANCE_TYPE === 'secondary'
+                            ? ':warning: **MODO SECUNDÁRIO ATIVO**\nO servidor primário está offline, o servidor secundário assumiu o controle, o tempo de resposta do BOT pode ficar mais lento.'
+                            : ':warning: **MODO BACKUP ATIVO**\nOs servidores primário e secundário estão offline, o servidor de backup assumiu o controle, o tempo de resposta do BOT pode ficar mais lento.';
 
                     const encodeStartedAt = performance.now();
                     const image = await this.buildStatusImage();
@@ -622,12 +637,12 @@ class BotStatus {
                     const fileName = `kami-status-${Math.floor(Date.now() / 60000)}.${STATUS_IMAGE_EXTENSION}`;
 
                     const botStatusEmbed = new EmbedBuilder();
-                    botStatusEmbed.setColor(isBackup ? 0xff9900 : Number(config.EMBED_COLOR));
-                    botStatusEmbed.setTitle(isBackup ? 'Status do Kami BOT (Servidor Backup)' : 'Status do Kami BOT');
+                    botStatusEmbed.setColor(isContingency ? 0xff9900 : Number(config.EMBED_COLOR));
+                    botStatusEmbed.setTitle(
+                        isContingency ? `Status do Kami BOT (${roleTitle})` : 'Status do Kami BOT'
+                    );
                     botStatusEmbed.setDescription(
-                        isBackup
-                            ? ':warning: **MODO BACKUP ATIVO**\nO servidor primário está offline, o servidor de backup assumiu o controle, o tempo de resposta do BOT pode ficar mais lento.'
-                            : 'Monitoramento em tempo real do BOT e da comunidade.'
+                        isContingency ? contingencyMessage : 'Monitoramento em tempo real do BOT e da comunidade.'
                     );
                     botStatusEmbed.setImage(`attachment://${fileName}`);
                     botStatusEmbed.setTimestamp(Date.now());

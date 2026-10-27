@@ -1,4 +1,5 @@
 import * as validations from './validations.ts';
+import type { InstanceRole } from './instance';
 import { PrismaClient, users } from '@prisma/client';
 import type { Buffer } from 'node:buffer';
 import { ComponentBuilder, EmbedBuilder } from '@discordjs/builders';
@@ -29,15 +30,20 @@ declare global {
         EMBED_COLOR: string;
         VERSION: string;
         API_TOKEN: string;
-        INSTANCE_TYPE: 'primary' | 'backup';
+        INSTANCE_TYPE: InstanceRole;
         PRIMARY_INSTANCE_STATUS_URL?: string;
         PRIMARY_INSTANCE_API_TOKEN?: string;
+        SECONDARY_INSTANCE_STATUS_URL?: string;
+        SECONDARY_INSTANCE_API_TOKEN?: string;
         CLOUDFLARE_API_TOKEN?: string;
         CLOUDFLARE_ZONE_ID?: string;
         CLOUDFLARE_DNS_RECORD_NAME?: string;
         CLOUDFLARE_DNS_PRIMARY_TYPE?: 'A' | 'AAAA' | 'CNAME';
         CLOUDFLARE_DNS_PRIMARY_CONTENT?: string;
         CLOUDFLARE_DNS_PRIMARY_PROXIED?: boolean;
+        CLOUDFLARE_DNS_SECONDARY_TYPE?: 'A' | 'AAAA' | 'CNAME';
+        CLOUDFLARE_DNS_SECONDARY_CONTENT?: string;
+        CLOUDFLARE_DNS_SECONDARY_PROXIED?: boolean;
         CLOUDFLARE_DNS_BACKUP_TYPE?: 'A' | 'AAAA' | 'CNAME';
         CLOUDFLARE_DNS_BACKUP_CONTENT?: string;
         CLOUDFLARE_DNS_BACKUP_PROXIED?: boolean;

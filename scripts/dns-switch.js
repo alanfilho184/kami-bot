@@ -5,7 +5,7 @@ const dotenv = require('dotenv');
 
 const root = path.resolve(__dirname, '..');
 const args = process.argv.slice(2);
-const commands = ['status', 'primary', 'backup'];
+const commands = ['status', 'primary', 'secondary', 'backup'];
 const command = args.find(arg => commands.includes(arg));
 const yes = args.includes('--yes');
 const dryRun = !yes || args.includes('--dry-run');
@@ -13,7 +13,9 @@ const envArg = args.find(arg => arg.startsWith('--env='));
 const envName = envArg ? envArg.slice('--env='.length) : process.env.NODE_ENV === 'production' ? 'prod' : 'dev';
 
 if (!command) {
-    console.error('Uso: node scripts/dns-switch.js <status|primary|backup> [--env=dev|prod] [--yes] [--dry-run]');
+    console.error(
+        'Uso: node scripts/dns-switch.js <status|primary|secondary|backup> [--env=dev|prod] [--yes] [--dry-run]'
+    );
     process.exit(1);
 }
 
@@ -42,23 +44,33 @@ const { CloudflareDns } = require(distPath);
 
 const proxied = value => value !== 'false';
 const recordName = process.env.CLOUDFLARE_DNS_RECORD_NAME || '';
+const targets = {
+    primary: {
+        type: process.env.CLOUDFLARE_DNS_PRIMARY_TYPE || 'CNAME',
+        content: process.env.CLOUDFLARE_DNS_PRIMARY_CONTENT || '',
+        proxied: proxied(process.env.CLOUDFLARE_DNS_PRIMARY_PROXIED)
+    },
+    secondary: {
+        type: process.env.CLOUDFLARE_DNS_SECONDARY_TYPE || 'CNAME',
+        content: process.env.CLOUDFLARE_DNS_SECONDARY_CONTENT || '',
+        proxied: proxied(process.env.CLOUDFLARE_DNS_SECONDARY_PROXIED)
+    }
+};
+
+if (process.env.CLOUDFLARE_DNS_BACKUP_CONTENT) {
+    targets.backup = {
+        type: process.env.CLOUDFLARE_DNS_BACKUP_TYPE || 'CNAME',
+        content: process.env.CLOUDFLARE_DNS_BACKUP_CONTENT,
+        proxied: proxied(process.env.CLOUDFLARE_DNS_BACKUP_PROXIED)
+    };
+}
+
 const dns = new CloudflareDns({
     apiToken: process.env.CLOUDFLARE_API_TOKEN || '',
     zoneId: process.env.CLOUDFLARE_ZONE_ID || '',
     recordName,
     ttl: Number(process.env.CLOUDFLARE_DNS_TTL) || 60,
-    targets: {
-        primary: {
-            type: process.env.CLOUDFLARE_DNS_PRIMARY_TYPE || 'CNAME',
-            content: process.env.CLOUDFLARE_DNS_PRIMARY_CONTENT || '',
-            proxied: proxied(process.env.CLOUDFLARE_DNS_PRIMARY_PROXIED)
-        },
-        backup: {
-            type: process.env.CLOUDFLARE_DNS_BACKUP_TYPE || 'CNAME',
-            content: process.env.CLOUDFLARE_DNS_BACKUP_CONTENT || '',
-            proxied: proxied(process.env.CLOUDFLARE_DNS_BACKUP_PROXIED)
-        }
-    }
+    targets
 });
 
 function printRecords(records) {
@@ -78,7 +90,7 @@ async function main() {
     if (!dns.isConfigured) {
         console.error(
             'Cloudflare DNS não configurado. Verifique CLOUDFLARE_API_TOKEN, CLOUDFLARE_ZONE_ID, ' +
-                'CLOUDFLARE_DNS_RECORD_NAME, CLOUDFLARE_DNS_PRIMARY_CONTENT e CLOUDFLARE_DNS_BACKUP_CONTENT.'
+                'CLOUDFLARE_DNS_RECORD_NAME, CLOUDFLARE_DNS_PRIMARY_CONTENT e CLOUDFLARE_DNS_SECONDARY_CONTENT.'
         );
         process.exitCode = 1;
         return;
@@ -88,6 +100,7 @@ async function main() {
         console.log(`Registro: ${recordName}`);
         console.log('Estado atual:');
         printRecords(await dns.getRecords());
+        console.log(`Papel ativo: ${(await dns.getCurrentTarget()) ?? 'desconhecido'}`);
         return;
     }
 
