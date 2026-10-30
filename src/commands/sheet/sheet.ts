@@ -215,7 +215,7 @@ export default {
                     let newSheetName = sheetName;
 
                     try {
-                        newSheetName = new Sheet_Name(sheetName);
+                        newSheetName = new Sheet_Name(sheetName).sheet_name;
                     } catch (err: any) {
                         let errorMsg = '';
                         if (err.code == 'Exceeded the maximum of 32 characters') {
@@ -239,7 +239,7 @@ export default {
                         return;
                     }
 
-                    const newSheet = SheetServices.prepareNewSheet(`${newSheetName}`, int.kami_user?.id!);
+                    const newSheet = SheetServices.prepareNewSheet(newSheetName, int.kami_user?.id!);
                     sheet = await SheetController.create(newSheet);
 
                     sheetNameCache.add(int.kami_user?.id!, sheet.sheet_name);

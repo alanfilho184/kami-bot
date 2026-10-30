@@ -208,6 +208,7 @@ describe('/sheet confirmacao de criacao ($a$)', () => {
         await waitForCall(mockRest.patch, 3);
 
         expect(mockDb.sheets.create).toHaveBeenCalled();
+        expect(mockDb.sheets.create.mock.calls[0][0].data.sheet_name).toBe('Nova Ficha');
         expect(mockDb.sheets.update).toHaveBeenCalled();
         expect(lastWebhookBody(mockRest)).toEqual(expect.objectContaining({ content: 'Ficha editada com sucesso!' }));
     });
