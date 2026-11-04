@@ -1,6 +1,7 @@
 import { ButtonBuilder, ActionRowBuilder } from '@discordjs/builders';
 import { Interaction } from '../../resources/utils/interaction-handler';
 import { localization } from '../../resources/localization';
+import { sheetErrorKey } from '../../resources/localization/sheet-errors';
 import { ButtonStyle } from 'discord-api-types/v10';
 import sheetNameCache from '../../resources/cache/sheet-name.cache';
 import { similaritySearch } from '../../resources/utils/string-similarity';
@@ -104,7 +105,7 @@ export default {
         if (validated instanceof Array) {
             const errors = new Set<string>();
             for (let err of validated) {
-                errors.add(localization(language, `sheet|${err.field}-${err.code}`));
+                errors.add(localization(language, sheetErrorKey(err.field, err.code)));
             }
 
             if (errors.size < 2) {

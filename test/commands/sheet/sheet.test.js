@@ -48,7 +48,7 @@ const sheetWithSection = (overrides = {}) =>
         ...overrides
     });
 
-const sheetOpts = (value) => [
+const sheetOpts = value => [
     { name: 'sheet_name', type: 3, value },
     { name: 'component_type', type: 3, value: '0' },
     { name: 'section', type: 3, value: 'Atributos' },
@@ -118,7 +118,11 @@ describe('/sheet criar/editar', () => {
         );
 
         expect(mockDb.sheets.update).not.toHaveBeenCalled();
-        expect(lastWebhookBody(mockRest)).toEqual(expect.objectContaining({ content: expect.any(String) }));
+        expect(lastWebhookBody(mockRest)).toEqual(
+            expect.objectContaining({
+                content: expect.stringContaining('O valor do atributo não pode ser maior que 1024 caracteres')
+            })
+        );
     });
 
     it('autocomplete de sheet_name sugere nomes do cache', async () => {
@@ -170,7 +174,10 @@ describe('/sheet validacoes e permissoes', () => {
         );
 
         expect(mockDb.sheets.update).not.toHaveBeenCalled();
-        expect(lastWebhookBody(mockRest)).toEqual(expect.objectContaining({ content: expect.any(String) }));
+        const content = lastWebhookBody(mockRest).content ?? '';
+        expect(content).toEqual(expect.stringContaining('O nome de um atributo não pode ser maior que 256 caracteres'));
+        expect(content).toEqual(expect.stringContaining('O valor do atributo não pode ser maior que 1024 caracteres'));
+        expect(content).toEqual(expect.stringContaining('\n'));
     });
 
     it('ficha legacy é migrada antes de editar', async () => {
@@ -187,6 +194,43 @@ describe('/sheet validacoes e permissoes', () => {
         // 1 update da migração + 1 da edição
         await waitForCall(mockDb.sheets.update, 2);
         expect(lastWebhookBody(mockRest)).toEqual(expect.objectContaining({ content: 'Ficha editada com sucesso!' }));
+    });
+});
+
+describe('/sheet erros de barra de progresso', () => {
+    const barOpts = (attribute, value) => [
+        { name: 'sheet_name', type: 3, value: 'Test Sheet' },
+        { name: 'component_type', type: 3, value: '4' },
+        { name: 'section', type: 3, value: 'Atributos' },
+        { name: 'attribute', type: 3, value: attribute },
+        { name: 'value', type: 3, value }
+    ];
+
+    it('BAR em atributo de outro tipo retorna type-mismatch traduzido', async () => {
+        mockDb.sheets.findFirst.mockResolvedValue(sheetWithSection());
+
+        await postCommandAndWaitReply(app, buildCommandInteraction({ name: 'sheet', options: barOpts('Força', '+1') }));
+
+        expect(mockDb.sheets.update).not.toHaveBeenCalled();
+        expect(lastWebhookBody(mockRest)).toEqual(
+            expect.objectContaining({
+                content: expect.stringContaining('Este atributo não é do tipo barra de progresso')
+            })
+        );
+    });
+
+    it('BAR em atributo inexistente retorna attribute-not-found traduzido', async () => {
+        mockDb.sheets.findFirst.mockResolvedValue(sheetWithSection());
+
+        await postCommandAndWaitReply(
+            app,
+            buildCommandInteraction({ name: 'sheet', options: barOpts('Inexistente', '+1') })
+        );
+
+        expect(mockDb.sheets.update).not.toHaveBeenCalled();
+        expect(lastWebhookBody(mockRest)).toEqual(
+            expect.objectContaining({ content: expect.stringContaining('Atributo não encontrado') })
+        );
     });
 });
 
@@ -393,7 +437,7 @@ describe('/sheet autocomplete avancado', () => {
 });
 
 describe('/sheet autocomplete value (ficha inexistente)', () => {
-    const ctxList = (value) => ({
+    const ctxList = value => ({
         name: 'sheet',
         focusedOption: { name: 'value', type: 3, value },
         options: [
@@ -421,7 +465,7 @@ describe('/sheet autocomplete value (ficha inexistente)', () => {
 });
 
 describe('/sheet autocomplete value (atributo inexistente)', () => {
-    const ctxList = (value) => ({
+    const ctxList = value => ({
         name: 'sheet',
         focusedOption: { name: 'value', type: 3, value },
         options: [
@@ -468,7 +512,7 @@ describe('/sheet autocomplete value (LIST/BAR existentes)', () => {
                 ]
             }
         });
-    const barSheet = (barValue) =>
+    const barSheet = barValue =>
         sheetWithSection({
             attributes: {
                 sections: [
@@ -595,7 +639,7 @@ describe('/sheet autocomplete value (LIST/BAR existentes)', () => {
 });
 
 describe('/sheet confirmacao com nome invalido e falhas de rede', () => {
-    const promptNew = async (sheetName) => {
+    const promptNew = async sheetName => {
         mockDb.sheets.findFirst.mockResolvedValue(null);
         mockDb.sheets.count.mockResolvedValue(0);
         await postCommandAndWaitReply(app, buildCommandInteraction({ name: 'sheet', options: sheetOpts(sheetName) }));

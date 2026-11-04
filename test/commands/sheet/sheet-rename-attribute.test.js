@@ -188,7 +188,33 @@ describe('/sheet_rename_attribute confirmacao ($a$) e autocomplete', () => {
         );
 
         expect(mockDb.sheets.update).not.toHaveBeenCalled();
-        expect(lastWebhookBody(mockRest)).toEqual(expect.objectContaining({ content: expect.any(String) }));
+        expect(lastWebhookBody(mockRest)).toEqual(
+            expect.objectContaining({
+                content: expect.stringContaining('Já existe um atributo com esse nome nesta seção')
+            })
+        );
+    });
+
+    it('atributo inexistente retorna attribute-not-found', async () => {
+        mockDb.sheets.findFirst.mockResolvedValue(sheetWithSection());
+
+        await postCommandAndWaitReply(
+            app,
+            buildCommandInteraction({
+                name: 'sheet_rename_attribute',
+                options: [
+                    { name: 'sheet_name', type: 3, value: 'Test Sheet' },
+                    { name: 'section', type: 3, value: 'Atributos' },
+                    { name: 'attribute', type: 3, value: 'Inexistente' },
+                    { name: 'new_name', type: 3, value: 'Destreza' }
+                ]
+            })
+        );
+
+        expect(mockDb.sheets.update).not.toHaveBeenCalled();
+        expect(lastWebhookBody(mockRest)).toEqual(
+            expect.objectContaining({ content: expect.stringContaining('Atributo não encontrado') })
+        );
     });
 
     it('autocomplete de section sugere secoes da ficha', async () => {

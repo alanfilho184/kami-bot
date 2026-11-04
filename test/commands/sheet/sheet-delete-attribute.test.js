@@ -226,7 +226,9 @@ describe('/sheet_delete_attribute guards e pt-br', () => {
         );
 
         expect(mockDb.sheets.update).not.toHaveBeenCalled();
-        expect(lastWebhookBody(mockRest)).toEqual(expect.objectContaining({ content: expect.any(String) }));
+        expect(lastWebhookBody(mockRest)).toEqual(
+            expect.objectContaining({ content: expect.stringContaining('Atributo não encontrado') })
+        );
     });
 
     it('multiplos erros retornam multiple-validation-errors', async () => {
@@ -248,9 +250,10 @@ describe('/sheet_delete_attribute guards e pt-br', () => {
                 })
             );
 
-            expect(lastWebhookBody(mockRest)).toEqual(
-                expect.objectContaining({ content: expect.stringContaining('\n') })
-            );
+            const content = lastWebhookBody(mockRest).content ?? '';
+            expect(content).toEqual(expect.stringContaining('Seção não encontrada'));
+            expect(content).toEqual(expect.stringContaining('Atributo não encontrado'));
+            expect(content).toEqual(expect.stringContaining('\n'));
         } finally {
             spy.mockRestore();
         }

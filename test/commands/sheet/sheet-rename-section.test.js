@@ -210,7 +210,30 @@ describe('/sheet_rename_section guards e pt-br', () => {
         );
 
         expect(mockDb.sheets.update).not.toHaveBeenCalled();
-        expect(lastWebhookBody(mockRest)).toEqual(expect.objectContaining({ content: expect.any(String) }));
+        expect(lastWebhookBody(mockRest)).toEqual(
+            expect.objectContaining({ content: expect.stringContaining('Já existe uma seção com esse nome na ficha') })
+        );
+    });
+
+    it('secao inexistente retorna section-not-found', async () => {
+        mockDb.sheets.findFirst.mockResolvedValue(sheetWithSection());
+
+        await postCommandAndWaitReply(
+            app,
+            buildCommandInteraction({
+                name: 'sheet_rename_section',
+                options: [
+                    { name: 'sheet_name', type: 3, value: 'Test Sheet' },
+                    { name: 'section', type: 3, value: 'Inexistente' },
+                    { name: 'new_name', type: 3, value: 'Perícias' }
+                ]
+            })
+        );
+
+        expect(mockDb.sheets.update).not.toHaveBeenCalled();
+        expect(lastWebhookBody(mockRest)).toEqual(
+            expect.objectContaining({ content: expect.stringContaining('Seção não encontrada') })
+        );
     });
 
     it('multiplos erros retornam multiple-validation-errors', async () => {
@@ -230,7 +253,10 @@ describe('/sheet_rename_section guards e pt-br', () => {
         );
 
         expect(mockDb.sheets.update).not.toHaveBeenCalled();
-        expect(lastWebhookBody(mockRest)).toEqual(expect.objectContaining({ content: expect.stringContaining('\n') }));
+        const content = lastWebhookBody(mockRest).content ?? '';
+        expect(content).toEqual(expect.stringContaining('O nome de uma seção não pode ser maior que 256 caracteres'));
+        expect(content).toEqual(expect.stringContaining('O nome da seção é inválido'));
+        expect(content).toEqual(expect.stringContaining('\n'));
     });
 
     it('aceita nomes de opcao em pt-br', async () => {

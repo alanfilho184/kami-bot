@@ -4,6 +4,8 @@ const path = require('node:path');
 
 const SRC_DIR = path.resolve(__dirname, '..', '..', 'src');
 const LOCALIZATION_DIR = path.join(SRC_DIR, 'resources', 'localization');
+const { sheetErrorKey } = require('../../src/resources/localization/sheet-errors');
+const { localization } = require('../../src/resources/localization');
 
 function collectTsFiles(dir) {
     const out = [];
@@ -30,6 +32,7 @@ function stripComments(code) {
 }
 
 const KEY_ARG = /localization\s*\(\s*[^,()]+,\s*(`(?:[^`\\]|\\.)*`|'(?:[^'\\\n]|\\.)*'|"(?:[^"\\\n]|\\.)*")/g;
+const SHEET_ERROR_PUSH = /errors\.push\(\{\s*field:\s*'([^']+)',\s*code:\s*'([^']+)'\s*\}\)/g;
 
 function extractUsages() {
     const usages = [];
@@ -119,6 +122,53 @@ describe('localization keys (src ↔ messages.json)', () => {
         expect(problems).toEqual([]);
     });
 
+    it('sheetErrorKey evita prefixo duplicado do campo', () => {
+        expect(sheetErrorKey('attribute', 'attribute-not-found')).toBe('sheet|attribute-not-found');
+        expect(sheetErrorKey('section', 'section-not-found')).toBe('sheet|section-not-found');
+        expect(sheetErrorKey('attribute', 'type-mismatch')).toBe('sheet|attribute-type-mismatch');
+        expect(sheetErrorKey('attribute', 'name-size')).toBe('sheet|attribute-name-size');
+    });
+
+    it('todo par field/code de erro de ficha tem chave de tradução', () => {
+        const combos = new Set();
+        for (const file of collectTsFiles(SRC_DIR)) {
+            if (!/sheet/i.test(path.basename(file))) continue;
+            const code = stripComments(fs.readFileSync(file, 'utf-8'));
+            SHEET_ERROR_PUSH.lastIndex = 0;
+            let match;
+            while ((match = SHEET_ERROR_PUSH.exec(code)) !== null) {
+                combos.add({ field: match[1], code: match[2] });
+            }
+        }
+
+        expect(combos.size).toBeGreaterThan(0);
+
+        const problems = [];
+        for (const { field, code } of combos) {
+            const key = sheetErrorKey(field, code);
+            const missing = langFiles.filter(l => !(key in l.dict)).map(l => l.lang);
+            if (missing.length > 0) {
+                problems.push(
+                    `"${key}" (field=${field}, code=${code}) usada em src — ausente em: ${missing.join(', ')}`
+                );
+            }
+        }
+
+        expect(problems).toEqual([]);
+    });
+
+    it('comandos de ficha não montam a chave de erro manualmente', () => {
+        const offenders = [];
+        for (const file of collectTsFiles(SRC_DIR)) {
+            const code = stripComments(fs.readFileSync(file, 'utf-8'));
+            if (code.includes('${err.field}-${err.code}')) {
+                offenders.push(path.relative(SRC_DIR, file).replace(/\\/g, '/'));
+            }
+        }
+
+        expect(offenders).toEqual([]);
+    });
+
     it('todos os messages.json têm o mesmo conjunto de chaves', () => {
         const problems = [];
         const allKeys = new Set();
@@ -136,6 +186,14 @@ describe('localization keys (src ↔ messages.json)', () => {
         }
 
         expect(problems).toEqual([]);
+    });
+
+    it('chave ausente retorna fallback em vez de lançar', () => {
+        expect(localization('en-us', 'sheet|chave-que-nao-existe')).toBe('Localization error');
+    });
+
+    it('idioma desconhecido retorna fallback em vez de lançar', () => {
+        expect(localization('xx-xx', 'help|title')).toBe('Localization error');
     });
 
     it('nenhum valor de tradução está vazio', () => {

@@ -94,7 +94,9 @@ describe('/sheet_delete_section', () => {
             })
         );
 
-        expect(lastWebhookBody(mockRest)).toEqual(expect.objectContaining({ content: expect.any(String) }));
+        expect(lastWebhookBody(mockRest)).toEqual(
+            expect.objectContaining({ content: expect.stringContaining('Seção não encontrada') })
+        );
     });
 
     it('multiplos erros retornam multiple-validation-errors', async () => {
@@ -115,9 +117,12 @@ describe('/sheet_delete_section', () => {
                 })
             );
 
-            expect(lastWebhookBody(mockRest)).toEqual(
-                expect.objectContaining({ content: expect.stringContaining('\n') })
+            const content = lastWebhookBody(mockRest).content ?? '';
+            expect(content).toEqual(expect.stringContaining('Seção não encontrada'));
+            expect(content).toEqual(
+                expect.stringContaining('O nome de uma seção não pode ser maior que 256 caracteres')
             );
+            expect(content).toEqual(expect.stringContaining('\n'));
         } finally {
             spy.mockRestore();
         }

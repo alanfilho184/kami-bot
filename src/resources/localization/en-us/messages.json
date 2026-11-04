@@ -63,8 +63,6 @@
     "sheet|section-renamed": "Section renamed successfully",
     "sheet|section-not-found": "Section not found",
     "sheet|attribute-not-found": "Attribute not found",
-    "sheet|attribute-attribute-not-found": "Attribute not found",
-    "sheet|section-section-not-found": "Section not found",
     "sheet|attribute-name-duplicate": "An attribute with this name already exists in this section",
     "sheet|section-name-duplicate": "A section with this name already exists on the sheet",
     "sheet|create-new-sheet-button": "Confirm",
