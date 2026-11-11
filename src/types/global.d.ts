@@ -6,7 +6,7 @@ import { ComponentBuilder, EmbedBuilder } from '@discordjs/builders';
 import { Snowflake, TextChannelType, Locale } from 'discord-api-types/v10';
 import { Interaction } from '../resources/utils/interaction-handler.js';
 import { ActionRow } from 'discord-interactions';
-import { DateTime } from 'luxon';
+import type { LogContext } from '../logs/types';
 
 export {};
 
@@ -30,7 +30,12 @@ declare global {
         EMBED_COLOR: string;
         VERSION: string;
         API_TOKEN: string;
+        KAMI_SITE_URL: string;
+        BOT_SYNC_TOKEN: string;
         INSTANCE_TYPE: InstanceRole;
+        LOGGER_URL?: string;
+        LOGGER_TOKEN?: string;
+        INSTANCE_NAME: string;
         PRIMARY_INSTANCE_STATUS_URL?: string;
         PRIMARY_INSTANCE_API_TOKEN?: string;
         SECONDARY_INSTANCE_STATUS_URL?: string;
@@ -51,11 +56,19 @@ declare global {
     };
 
     interface Logger {
-        logFile: string;
-        logHttp(req: Express.Request, res: Express.Response, responseBody: unknown): void;
-        logText(level: 'INFO' | 'WARN' | 'ERROR', message: unknown, automated?: boolean): void;
-        logDiscord(int: Interaction): void;
-        getLog(date: DateTime): string | false;
+        logText(level: 'INFO' | 'WARN' | 'ERROR', message: unknown, automated?: boolean, context?: LogContext): void;
+        info(message: unknown, context?: LogContext): void;
+        warn(message: unknown, context?: LogContext): void;
+        error(message: unknown, context?: LogContext): void;
+        logTexto(level: 'INFO' | 'WARN' | 'ERROR', message: unknown, context?: LogContext): void;
+        logDiscord(int: Interaction): Promise<void>;
+        logInteractionResult(
+            int: Interaction,
+            options: { execution_ms: number | null; event: string; error?: unknown; remote?: boolean }
+        ): void;
+        setUserId(userId: number | null): void;
+        flush(): Promise<void>;
+        close(): Promise<void>;
     }
 
     type Db = PrismaClient;
@@ -127,7 +140,11 @@ declare global {
 
     enum Section_Type {
         STANDARD = 0,
-        DESCRIPTION = 1
+        DESCRIPTION = 1,
+        HEADER = 2,
+        STATUS = 3,
+        GALLERY = 4,
+        TABLE = 5
     }
 
     enum Attribute_Type {
@@ -135,7 +152,9 @@ declare global {
         NUMBER = 1,
         IMAGE = 2,
         LIST = 3,
-        BAR = 4
+        BAR = 4,
+        STATUS = 5,
+        TABLE = 6
     }
 
     enum Macro_Type {
@@ -164,6 +183,7 @@ declare global {
         avatar?: string;
         email: string;
         password: string;
+        has_site_account?: boolean;
         is_beta: boolean;
         is_premium: boolean;
         last_use: Date;
@@ -192,11 +212,80 @@ declare global {
         force_language: boolean;
     };
 
+    type Sheet_List_Item = {
+        name: string;
+        quantity: string;
+    };
+
+    type Sheet_List_Value = {
+        items: Sheet_List_Item[];
+    };
+
+    type Sheet_Bar_Value = {
+        actual: number;
+        max: number;
+        min: number;
+        step: number;
+        color?: string;
+        background?: string;
+        pattern?: 'solid' | 'segmented';
+        flashBelow?: number;
+        blink?: boolean;
+    };
+
+    type Sheet_Status_Item = {
+        id: string;
+        name: string;
+        color: string;
+        blink: boolean;
+        active: boolean;
+        icon?: string;
+    };
+
+    type Sheet_Status_Value = {
+        items: Sheet_Status_Item[];
+    };
+
+    type Sheet_Table_Value = {
+        columns: string[];
+        rows: string[][];
+    };
+
+    type Sheet_Layout_Attribute = {
+        span: number;
+        rows: number;
+    };
+
+    type Sheet_Layout_Header = {
+        title?: string;
+        subtitle?: string;
+        image?: string;
+        imageWidth?: number;
+        titleSize?: number;
+    };
+
+    type Sheet_Layout_Section = {
+        columns: number;
+        rows?: number;
+        dense?: boolean;
+        header?: Sheet_Layout_Header;
+        attributes?: Record<string, Sheet_Layout_Attribute>;
+        full?: string[];
+        span?: number;
+    };
+
+    type Sheet_Layout = {
+        sections: Record<string, Sheet_Layout_Section>;
+    };
+
+    type Attribute_Value =
+        string | number | Sheet_List_Value | Sheet_Bar_Value | Sheet_Status_Value | Sheet_Table_Value;
+
     type Attribute = {
         name: string;
         position: number;
         type: Attribute_Type;
-        value: string | number;
+        value: Attribute_Value;
         config?: {
             width?: number;
             height?: number;
@@ -208,6 +297,13 @@ declare global {
         };
     };
 
+    type Sheet_Section = {
+        name: string;
+        position: number;
+        type: Section_Type;
+        attributes: Attribute[];
+    };
+
     type Sheet = {
         id: number;
         user_id: number;
@@ -215,6 +311,10 @@ declare global {
             id: number;
             username: string;
             avatar?: string;
+            discord_id?: Discord_Id;
+            email?: string | null;
+            password?: string | null;
+            has_site_account?: boolean;
             is_beta: boolean;
             is_premium: boolean;
         };
@@ -222,15 +322,9 @@ declare global {
         sheet_password: string;
         is_public: boolean;
         attributes: {
-            sections: [
-                {
-                    name: string;
-                    position: number;
-                    type: Section_Type;
-                    attributes: Attribute[];
-                }
-            ];
+            sections: Sheet_Section[];
         };
+        sheet_layout?: Sheet_Layout | null;
         legacy: boolean;
         last_use: Date;
     };
@@ -345,7 +439,7 @@ declare global {
             start: Function;
         }
         interface Request {
-            startTime: number;
+            requestId: string;
             user: {
                 id: number;
                 discord_id?: Discord_Id;

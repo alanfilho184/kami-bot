@@ -1,6 +1,6 @@
 {
     "name": "kami-bot-http",
-    "version": "5.3.3",
+    "version": "5.4.0",
     "main": "server.js",
     "scripts": {
         "start": "node dist/app.js",
@@ -48,6 +48,7 @@
         "os-utils": "^0.0.14",
         "prisma": "^6.2.1",
         "sharp": "^0.35.5",
+        "socket.io-client": "^4.8.4",
         "tweetnacl": "^1.0.3"
     },
     "devDependencies": {

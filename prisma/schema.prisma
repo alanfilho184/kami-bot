@@ -1,119 +1,124 @@
 generator client {
-    provider   = "prisma-client-js"
-    engineType = "binary"
+  provider   = "prisma-client-js"
+  engineType = "binary"
 }
 
 datasource db {
-    provider = "postgresql"
-    url      = env("DATABASE_URL")
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 enum Ban_Type {
-    TEMPORARY
-    PERMANENT
-    UNBANNED
+  TEMPORARY
+  PERMANENT
+  UNBANNED
 }
 
 enum Available_Languages {
-    PT_BR @map("pt-br")
-    EN_US @map("en-us")
+  PT_BR @map("pt-br")
+  EN_US @map("en-us")
 }
 
 enum ActivityStatus {
-    SUCCESS
-    FAILED
+  SUCCESS
+  FAILED
 }
 
 enum AnnouncementMode {
-    ALWAYS
-    ONCE
-    INTERVAL
+  ALWAYS
+  ONCE
+  INTERVAL
 }
 
 model users {
-    id         Int      @id @default(autoincrement())
-    discord_id String?  @unique
-    username   String?  @unique
-    avatar     String?
-    email      String?  @unique
-    password   String?
-    is_beta    Boolean  @default(false)
-    is_premium Boolean  @default(false)
-    last_use   DateTime @default(now()) @updatedAt @db.Timestamptz
-    created_at DateTime @default(now())
+  id                Int       @id @default(autoincrement())
+  discord_id        String?   @unique
+  username          String?   @unique
+  avatar            String?
+  email             String?   @unique
+  password          String?
+  is_beta           Boolean   @default(false)
+  is_premium        Boolean   @default(false)
+  last_use          DateTime  @default(now()) @updatedAt @db.Timestamptz
+  created_at        DateTime  @default(now())
+  terms_accepted_at DateTime? @db.Timestamptz
+  email_verified_at DateTime? @db.Timestamptz
 
-    blocked_users      blocked_users[]
-    irt_sheets         irt_sheets[]
-    sheets             sheets[]
-    user_config        users_config[]
-    macros             macros[]
-    announcementsSeens announcements_seen[]
+  blocked_users      blocked_users[]
+  irt_sheets         irt_sheets[]
+  sheets             sheets[]
+  user_config        users_config[]
+  macros             macros[]
+  announcementsSeens announcements_seen[]
 
-    @@index([last_use])
+  @@index([last_use])
 }
 
 model blocked_users {
-    id           Int      @id @default(autoincrement())
-    User         users    @relation(fields: [user_id], references: [id])
-    user_id      Int
-    ban_count    Int
-    current_ban  Ban_Type
-    ban_duration DateTime @db.Timestamptz
-    last_use     DateTime @default(now()) @updatedAt @db.Timestamptz
-    created_at   DateTime @default(now())
+  id           Int      @id @default(autoincrement())
+  User         users    @relation(fields: [user_id], references: [id])
+  user_id      Int
+  ban_count    Int
+  current_ban  Ban_Type
+  ban_duration DateTime @db.Timestamptz
+  last_use     DateTime @default(now()) @updatedAt @db.Timestamptz
+  created_at   DateTime @default(now())
 }
 
 model irt_sheets {
-    id         Int      @id @default(autoincrement())
-    User       users    @relation(fields: [user_id], references: [id])
-    user_id    Int
-    Sheet_Id   sheets   @relation(fields: [sheet_id], references: [id])
-    sheet_id   Int
-    msg_id     String
-    channel_id String
-    last_use   DateTime @default(now()) @updatedAt @db.Timestamptz
-    created_at DateTime @default(now())
+  id             Int       @id @default(autoincrement())
+  User           users     @relation(fields: [user_id], references: [id])
+  user_id        Int
+  Sheet_Id       sheets    @relation(fields: [sheet_id], references: [id])
+  sheet_id       Int
+  msg_id         String
+  channel_id     String
+  last_synced_at DateTime? @db.Timestamptz
+  sync_failures  Int       @default(0)
+  last_use       DateTime  @default(now()) @updatedAt @db.Timestamptz
+  created_at     DateTime  @default(now())
 
-    @@index([sheet_id])
-    @@index([msg_id])
-    @@index([user_id])
+  @@index([sheet_id])
+  @@index([msg_id])
+  @@index([user_id])
 }
 
 model servers_config {
-    id             Int                 @id @default(autoincrement())
-    server_id      String
-    language       Available_Languages
-    force_language Boolean             @default(false)
-    last_use       DateTime            @default(now()) @updatedAt @db.Timestamptz
-    created_at     DateTime            @default(now())
+  id             Int                 @id @default(autoincrement())
+  server_id      String
+  language       Available_Languages
+  force_language Boolean             @default(false)
+  last_use       DateTime            @default(now()) @updatedAt @db.Timestamptz
+  created_at     DateTime            @default(now())
 }
 
 model sheets {
-    id             Int          @id @default(autoincrement())
-    User           users        @relation(fields: [user_id], references: [id])
-    user_id        Int
-    sheet_name     String
-    sheet_password String?
-    last_use       DateTime     @default(now()) @updatedAt @db.Timestamptz
-    attributes     Json
-    legacy         Boolean      @default(false)
-    is_public      Boolean      @default(false)
-    created_at     DateTime     @default(now())
-    irt_sheets     irt_sheets[]
+  id             Int          @id @default(autoincrement())
+  User           users        @relation(fields: [user_id], references: [id])
+  user_id        Int
+  sheet_name     String
+  sheet_password String?
+  last_use       DateTime     @default(now()) @updatedAt @db.Timestamptz
+  attributes     Json
+  sheet_layout   Json?
+  legacy         Boolean      @default(false)
+  is_public      Boolean      @default(false)
+  created_at     DateTime     @default(now())
+  irt_sheets     irt_sheets[]
 
-    @@index([user_id])
-    @@index([user_id, sheet_name], name: "idx_sheets_user_sheet_name")
+  @@index([user_id])
+  @@index([user_id, sheet_name], name: "idx_sheets_user_sheet_name")
 }
 
 model macros {
-    id         Int      @id @default(autoincrement())
-    User       users    @relation(fields: [user_id], references: [id])
-    user_id    Int
-    macro_name String
-    macros     Json
-    last_use   DateTime @default(now()) @updatedAt @db.Timestamptz
-    is_public  Boolean  @default(false)
-    created_at DateTime @default(now())
+  id         Int      @id @default(autoincrement())
+  User       users    @relation(fields: [user_id], references: [id])
+  user_id    Int
+  macro_name String
+  macros     Json
+  last_use   DateTime @default(now()) @updatedAt @db.Timestamptz
+  is_public  Boolean  @default(false)
+  created_at DateTime @default(now())
 }
 
 // model campaings {
@@ -126,73 +131,73 @@ model macros {
 // }
 
 model logs {
-    id            Int            @id @default(autoincrement())
-    user_id       Int?
-    action_type   String
-    action_target String
-    timestamp     DateTime       @default(now())
-    status        ActivityStatus
-    source_system String?
+  id            Int            @id @default(autoincrement())
+  user_id       Int?
+  action_type   String
+  action_target String
+  timestamp     DateTime       @default(now())
+  status        ActivityStatus
+  source_system String?
 
-    @@index([action_type, timestamp])
+  @@index([action_type, timestamp])
 }
 
 model users_config {
-    id             Int                 @id @default(autoincrement())
-    User           users               @relation(fields: [user_id], references: [id])
-    user_id        Int                 @unique
-    language       Available_Languages @default(PT_BR)
-    secret_roll    Boolean             @default(false)
-    secret_insan   Boolean             @default(false)
-    secret_general Boolean             @default(false)
-    secret_sheet   Boolean             @default(false)
-    secret_send    Boolean             @default(false)
-    last_use       DateTime            @default(now()) @updatedAt @db.Timestamptz
-    created_at     DateTime            @default(now())
+  id             Int                 @id @default(autoincrement())
+  User           users               @relation(fields: [user_id], references: [id])
+  user_id        Int                 @unique
+  language       Available_Languages @default(PT_BR)
+  secret_roll    Boolean             @default(false)
+  secret_insan   Boolean             @default(false)
+  secret_general Boolean             @default(false)
+  secret_sheet   Boolean             @default(false)
+  secret_send    Boolean             @default(false)
+  last_use       DateTime            @default(now()) @updatedAt @db.Timestamptz
+  created_at     DateTime            @default(now())
 }
 
 model tutorials {
-    id          Int      @id @default(autoincrement())
-    link        String   @unique
-    title       String
-    description String
-    thumbnail   String
-    tags        String[]
-    tutorial    String
+  id          Int      @id @default(autoincrement())
+  link        String   @unique
+  title       String
+  description String
+  thumbnail   String
+  tags        String[]
+  tutorial    String
 }
 
 model resources {
-    id       Int                  @id @default(autoincrement())
-    name     String
-    data     Json
-    language Available_Languages?
+  id       Int                  @id @default(autoincrement())
+  name     String
+  data     Json
+  language Available_Languages?
 
-    @@unique([name, language])
+  @@unique([name, language])
 }
 
 model announcement {
-    id                    Int                  @id @default(autoincrement())
-    content               Json
-    title                 String?
-    mode                  AnnouncementMode     @default(ONCE)
-    repeat_interval_hours Int?
-    priority              Int                  @default(0) // Maior = exibido primeiro
-    is_active             Boolean              @default(true)
-    created_at            DateTime             @default(now())
-    seen_by               announcements_seen[]
+  id                    Int                  @id @default(autoincrement())
+  content               Json
+  title                 String?
+  mode                  AnnouncementMode     @default(ONCE)
+  repeat_interval_hours Int?
+  priority              Int                  @default(0) // Maior = exibido primeiro
+  is_active             Boolean              @default(true)
+  created_at            DateTime             @default(now())
+  seen_by               announcements_seen[]
 
-    @@index([is_active, priority])
+  @@index([is_active, priority])
 }
 
 model announcements_seen {
-    id              Int          @id @default(autoincrement())
-    user_id         Int
-    announcement_id Int
-    user            users        @relation(fields: [user_id], references: [id], onDelete: Cascade)
-    announcement    announcement @relation(fields: [announcement_id], references: [id], onDelete: Cascade)
-    first_seen      DateTime     @default(now())
-    last_seen_date  DateTime     @default(now()) @updatedAt @db.Timestamptz
+  id              Int          @id @default(autoincrement())
+  user_id         Int
+  announcement_id Int
+  user            users        @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  announcement    announcement @relation(fields: [announcement_id], references: [id], onDelete: Cascade)
+  first_seen      DateTime     @default(now())
+  last_seen_date  DateTime     @default(now()) @updatedAt @db.Timestamptz
 
-    @@unique([user_id, announcement_id]) // Garante a unicidade do par
-    @@index([user_id, last_seen_date])
+  @@unique([user_id, announcement_id]) // Garante a unicidade do par
+  @@index([user_id, last_seen_date])
 }

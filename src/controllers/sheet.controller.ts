@@ -1,9 +1,11 @@
 import db from '../configs/database';
+import { Prisma } from '@prisma/client';
 
 type PreparedSheetUpdate = {
     sheet_name: Sheet_Name;
     is_public: boolean;
     attributes: {};
+    sheet_layout?: Sheet_Layout | null;
     legacy: false;
     last_use: Date;
 };
@@ -18,6 +20,7 @@ function toSheet(sheet: any): Sheet | null {
             is_public: sheet.is_public,
             legacy: sheet.legacy,
             attributes: sheet.attributes,
+            sheet_layout: sheet.sheet_layout ?? null,
             last_use: sheet.last_use
         };
     } catch (err) {
@@ -36,6 +39,7 @@ function toSheetArray(sheets: any[]): Sheet[] | null {
                 is_public: sheet.is_public,
                 legacy: sheet.legacy,
                 attributes: sheet.attributes,
+                sheet_layout: sheet.sheet_layout ?? null,
                 last_use: sheet.last_use
             };
         });
@@ -204,6 +208,10 @@ export default class SheetController {
                 data: {
                     sheet_name: newSheet.sheet_name,
                     attributes: newSheet.attributes,
+                    sheet_layout:
+                        newSheet.sheet_layout === null
+                            ? Prisma.DbNull
+                            : (newSheet.sheet_layout as Prisma.InputJsonValue | undefined),
                     is_public: newSheet.is_public,
                     legacy: false,
                     last_use: newSheet.last_use
@@ -295,6 +303,47 @@ export default class SheetController {
         } else {
             throw new Error('Sheet not found');
         }
+    }
+
+    /**
+     * Cria o vínculo IRT com checagem de limite atômica.
+     *
+     * O advisory lock é por ficha; duas execuções simultâneas de
+     * `/ficha_enviar sync` não conseguem passar do limite.
+     */
+    static async createIrtSheetWithLimit(
+        userId: number,
+        sheetId: number,
+        msgId: string,
+        channelId: string,
+        limit: number | null
+    ): Promise<'created' | 'limit'> {
+        return db.$transaction(async tx => {
+            await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`sheet:irt:${sheetId}`}))`;
+
+            if (limit !== null) {
+                const count = await tx.irt_sheets.count({
+                    where: {
+                        sheet_id: sheetId
+                    }
+                });
+
+                if (count >= limit) {
+                    return 'limit' as const;
+                }
+            }
+
+            await tx.irt_sheets.create({
+                data: {
+                    user_id: userId,
+                    sheet_id: sheetId,
+                    msg_id: msgId,
+                    channel_id: channelId
+                }
+            });
+
+            return 'created' as const;
+        });
     }
 
     static async getIrtSheetBySheetId(sheetId: number): Promise<Irt_Sheet[] | null> {

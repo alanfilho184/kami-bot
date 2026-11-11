@@ -12,7 +12,7 @@ jest.mock('../../../src/configs/database', () => require('../../mocks/database')
 // causaria TDZ, pois ele importa '..' e executaria esta factory antes de
 // o binding existir.
 jest.mock('../../../src/commands', () => {
-    const stringArgs = (suffix) => ({
+    const stringArgs = suffix => ({
         'en-us': [
             { name: 'count', description: `A count ${suffix}`, type: 'INTEGER', required: false, autocomplete: false },
             { name: 'user', description: `A user ${suffix}`, type: 'USER', required: false, autocomplete: false },
@@ -124,11 +124,7 @@ const app = appModule.default;
 const { ready } = appModule;
 const rest = require('../../../src/configs/rest').default;
 const db = require('../../../src/configs/database').default;
-const {
-    lastWebhookBody,
-    setupDefaultDbMocks,
-    setupDefaultRestMocks
-} = require('../../helpers/mock-factories');
+const { lastWebhookBody, setupDefaultDbMocks, setupDefaultRestMocks } = require('../../helpers/mock-factories');
 const { buildCommandInteraction, postCommandAndWaitReply, waitAppReady } = require('../../helpers/interaction-factory');
 
 const mockRest = rest;
@@ -158,11 +154,16 @@ describe('/reloadslashs com todos os tipos de argumento', () => {
 
         // corpo global serializado contém os tipos numéricos das opções
         const globalBody = mockRest.put.mock.calls[0][1];
-        const flat = JSON.stringify(globalBody.body.map(c => (c && typeof c.toJSON === 'function' ? c.toJSON() : c)));
+        const globalCommands = globalBody.body.map(c => (c && typeof c.toJSON === 'function' ? c.toJSON() : c));
+        const flat = JSON.stringify(globalCommands);
         expect(flat).toContain('"type":4'); // INTEGER
         expect(flat).toContain('"type":6'); // USER
         expect(flat).toContain('"type":11'); // ATTACHMENT
         expect(flat).toContain('fakefull');
+
+        // comandos globais funcionam em servidor, DM com o bot e canais privados
+        expect(globalCommands.every(command => command.integration_types?.join(',') === '0,1')).toBe(true);
+        expect(globalCommands.every(command => command.contexts?.join(',') === '0,1,2')).toBe(true);
 
         const ownerBody = mockRest.put.mock.calls[1][1];
         const flatOwner = JSON.stringify(

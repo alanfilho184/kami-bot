@@ -7,7 +7,7 @@ import {
     ContextMenuCommandBuilder
 } from '@discordjs/builders';
 import rest from '../../configs/rest';
-import { Locale, Routes } from 'discord-api-types/v10';
+import { ApplicationIntegrationType, InteractionContextType, Locale, Routes } from 'discord-api-types/v10';
 import { Interaction } from '../../resources/utils/interaction-handler';
 import commandsBot from '..';
 import logger from '../../configs/logger';
@@ -235,6 +235,15 @@ export default {
                 } else {
                     newCommand.setDefaultMemberPermissions(null);
                     newCommand.setName(command.commandNames['en-us']).setDescription(command.descriptions['en-us']);
+                    newCommand.setIntegrationTypes([
+                        ApplicationIntegrationType.GuildInstall,
+                        ApplicationIntegrationType.UserInstall
+                    ]);
+                    newCommand.setContexts([
+                        InteractionContextType.Guild,
+                        InteractionContextType.BotDM,
+                        InteractionContextType.PrivateChannel
+                    ]);
 
                     for (let language in command.commandNames) {
                         const name = command.commandNames[language];
@@ -528,6 +537,15 @@ export default {
                     newCommand.setDefaultMemberPermissions(null);
                     newCommand.setName(command.commandNames['en-us']);
                     newCommand.setType(command.type);
+                    newCommand.setIntegrationTypes([
+                        ApplicationIntegrationType.GuildInstall,
+                        ApplicationIntegrationType.UserInstall
+                    ]);
+                    newCommand.setContexts([
+                        InteractionContextType.Guild,
+                        InteractionContextType.BotDM,
+                        InteractionContextType.PrivateChannel
+                    ]);
 
                     for (let language in command.commandNames) {
                         const name = command.commandNames[language];
@@ -550,7 +568,7 @@ export default {
         try {
             await rest.put(Routes.applicationCommands(int.application_id), { body: commands });
         } catch (err) {
-            logger.logText('ERROR', err);
+            logger.error(err, { event: 'commands.reload_failed', action: 'global' });
             return int.reply({ content: 'Erro ao recarregar os comandos' });
         }
 
@@ -559,7 +577,7 @@ export default {
                 body: commandsOwnerOnly
             });
         } catch (err) {
-            logger.logText('ERROR', err);
+            logger.error(err, { event: 'commands.reload_failed', action: 'owner_only' });
             return int.reply({ content: 'Erro ao recarregar os comandos ownerOnly' });
         }
 

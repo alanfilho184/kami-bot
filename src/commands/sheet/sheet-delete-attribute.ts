@@ -15,6 +15,7 @@ import logger from '../../configs/logger';
 import { createSheetEmbed } from './sheet-send';
 import syncSheet from '../../resources/utils/sync-sheet';
 import migrateLegacySheet from '../../resources/utils/migrate-legacy-sheet';
+import { buildSheetSiteUrl, isSpecialSection, removeLayoutAttribute } from '../../resources/utils/sheet-site';
 import { Command_Category } from '../../types/enums';
 
 export default {
@@ -100,6 +101,16 @@ export default {
             sheet = (await migrateLegacySheet(sheet)) ?? sheet;
         }
 
+        const existingSection = sheet.attributes.sections.find(s => s.name === section);
+
+        if (existingSection && isSpecialSection(existingSection)) {
+            return int.reply({
+                content: localization(language, 'sheet|edit-on-site', [
+                    { replace: '$url$', value: buildSheetSiteUrl(sheet) }
+                ])
+            });
+        }
+
         const validated = await SheetServices.validateDeleteAttribute(sheet, section, attribute);
 
         if (validated instanceof Array) {
@@ -120,6 +131,8 @@ export default {
         }
 
         const modifiedSheet = validated as Sheet;
+
+        removeLayoutAttribute(modifiedSheet, section, attribute);
 
         const tempId = randomUUID();
 

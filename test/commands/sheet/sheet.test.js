@@ -106,6 +106,47 @@ describe('/sheet criar/editar', () => {
         expect(lastWebhookBody(mockRest)).toEqual(expect.objectContaining({ content: 'Ficha editada com sucesso!' }));
     });
 
+    it('bloqueia edição de seção especial e encaminha para o site', async () => {
+        mockDb.sheets.findFirst.mockResolvedValue(
+            sheetWithSection({
+                attributes: {
+                    sections: [
+                        {
+                            name: 'Condição',
+                            position: 0,
+                            type: 3,
+                            attributes: [
+                                {
+                                    name: 'Estado',
+                                    value: { items: [] },
+                                    position: 0,
+                                    type: 5
+                                }
+                            ]
+                        }
+                    ]
+                }
+            })
+        );
+
+        await postCommandAndWaitReply(
+            app,
+            buildCommandInteraction({
+                name: 'sheet',
+                options: [
+                    { name: 'sheet_name', type: 3, value: 'Test Sheet' },
+                    { name: 'component_type', type: 3, value: '0' },
+                    { name: 'section', type: 3, value: 'Condição' },
+                    { name: 'attribute', type: 3, value: 'Estado' },
+                    { name: 'value', type: 3, value: 'x' }
+                ]
+            })
+        );
+
+        expect(mockDb.sheets.update).not.toHaveBeenCalled();
+        expect(lastWebhookBody(mockRest).content).toContain('só pode ser editada no site');
+    });
+
     it('valor invalido retorna erro de validacao', async () => {
         mockDb.sheets.findFirst.mockResolvedValue(sheetWithSection());
 

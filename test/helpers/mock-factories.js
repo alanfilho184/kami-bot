@@ -70,6 +70,7 @@ function fakeUserRow(overrides = {}) {
         email: null,
         avatar: 'default-avatar.png',
         password: null,
+        has_site_account: false,
         is_beta: false,
         is_premium: false,
         last_use: new Date(),
@@ -88,6 +89,7 @@ function fakeSheetRow(overrides = {}) {
         is_public: true,
         legacy: false,
         attributes: { sections: [] },
+        sheet_layout: null,
         last_use: new Date(),
         ...overrides
     };
@@ -113,12 +115,8 @@ function setupDefaultDbMocks(mockDb, userOverrides = {}) {
     mockDb.sheets.findFirst.mockResolvedValue(null);
     mockDb.sheets.findUnique.mockResolvedValue(null);
     mockDb.sheets.count.mockResolvedValue(0);
-    mockDb.sheets.create.mockImplementation(async (args) =>
-        fakeSheetRow({ ...(args?.data ?? {}) })
-    );
-    mockDb.sheets.update.mockImplementation(async (args) =>
-        fakeSheetRow({ ...(args?.data ?? {}) })
-    );
+    mockDb.sheets.create.mockImplementation(async args => fakeSheetRow({ ...(args?.data ?? {}) }));
+    mockDb.sheets.update.mockImplementation(async args => fakeSheetRow({ ...(args?.data ?? {}) }));
     mockDb.sheets.delete.mockResolvedValue(fakeSheetRow());
 
     mockDb.irt_sheets.findMany.mockResolvedValue([]);
@@ -150,6 +148,7 @@ function setupDefaultDbMocks(mockDb, userOverrides = {}) {
             total_components_prev_month: 1
         }
     ]);
+    mockDb.$executeRaw.mockResolvedValue(1);
     mockDb.$connect.mockResolvedValue(undefined);
 }
 
@@ -178,7 +177,7 @@ async function waitForCall(mockFn, minCalls = 1, timeoutMs = 10000) {
  */
 function findActionId(body, prefix) {
     const ids = [];
-    const walk = (value) => {
+    const walk = value => {
         if (Array.isArray(value)) {
             value.forEach(walk);
             return;

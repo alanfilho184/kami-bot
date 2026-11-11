@@ -8,6 +8,10 @@ type PreparedUser = {
     password: string | null;
 };
 
+function hasSiteAccount(user: any): boolean {
+    return Boolean(user.email && typeof user.password === 'string' && /^\$2[aby]\$/.test(user.password));
+}
+
 function toUser(user: any): User | (User & User_Config) | null {
     try {
         if (user.user_config && user.user_config.length > 0) {
@@ -18,6 +22,7 @@ function toUser(user: any): User | (User & User_Config) | null {
                 avatar: user.avatar,
                 email: user.email,
                 password: user.password,
+                has_site_account: hasSiteAccount(user),
                 is_beta: user.is_beta,
                 is_premium: user.is_premium,
                 last_use: user.last_use,
@@ -36,6 +41,7 @@ function toUser(user: any): User | (User & User_Config) | null {
                 avatar: user.avatar,
                 email: user.email,
                 password: user.password,
+                has_site_account: hasSiteAccount(user),
                 is_beta: user.is_beta,
                 is_premium: user.is_premium,
                 last_use: user.last_use

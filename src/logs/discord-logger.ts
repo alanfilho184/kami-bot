@@ -18,7 +18,7 @@ async function sendLogWebhook(content: string | EmbedBuilder | EmbedBuilder[], p
         body.content = ping ? `<@${config.OWNER_ID.discord_id}>` : '';
         body.embeds = [content];
     } else if (Array.isArray(content) && content.every(embed => embed instanceof EmbedBuilder)) {
-        body.content = ping ? `<@${config.OWNER_ID}>` : '';
+        body.content = ping ? `<@${config.OWNER_ID.discord_id}>` : '';
         body.embeds = content;
     } else if (typeof content == 'string') {
         body.content = content;
@@ -34,7 +34,7 @@ async function sendStartupWebhook() {
         .setColor(parseInt(config.EMBED_COLOR))
         .setTitle(`${config.INSTANCE_TYPE} instance started`)
         .setFooter({
-            text: `Kami v${config.VERSION} | ${DateTime.now()
+            text: `Kami v${config.VERSION} | ${config.INSTANCE_NAME} | ${DateTime.now()
                 .setZone('America/Sao_Paulo')
                 .toFormat('dd/MM/y | HH:mm:ss ')} (GMT -3)`
         });

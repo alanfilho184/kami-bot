@@ -1,4 +1,4 @@
-![Logo](https://kamiapp.com.br/assets/img/logo.webp)
+![Logo](https://kamiapp.com.br/marca/logo-120.webp)
 
 # Kami
 
@@ -45,13 +45,35 @@ The project is available in _**PT-BR**_ (default language) and _**EN-US**_. The 
 
 O site reúne informações, estatísticas e tutoriais relacionados ao Kami, futuramente será onde as maiores funcionalidades relacionadas a fichas e campanhas estarão presente.
 
+O comando `/vincular <código>` conecta a conta do Discord à conta do site. O código é gerado nas configurações do site e a confirmação final acontece no próprio site.
+
+A instância ativa do bot mantém as mensagens IRT sincronizadas com o site via `sheet.updated` e reconciliação periódica. Se uma mensagem não existir mais no Discord (`10008 Unknown Message`), o bot conta a falha em `irt_sheets.sync_failures` e remove o vínculo após 5 falhas consecutivas; um envio bem-sucedido zera o contador.
+
+O bot pode ser instalado em servidores e na conta do usuário. Os comandos globais são registrados com `integration_types: [0, 1]` e `contexts: [0, 1, 2]`; os comandos owner-only continuam restritos ao servidor de teste. A opção `sync` de `/ficha_enviar` só funciona em servidores com o bot instalado: em DM ou em instalação apenas no usuário, a ficha é enviada sem sincronização e o usuário recebe um aviso.
+
+## Logs
+
+O bot envia os eventos para o `kami-logger` por Socket.IO. O projeto no logger é `kami-bot-http` e os eventos chegam como `LOG` (`log-texto`), com `event`, `action`, `user_id`, `execution_ms` e os IDs de domínio.
+
+| Variável | Obrigatória | Uso |
+| --- | --- | --- |
+| `LOGGER_URL` | não | URL base do logger, sem `/socket.io` |
+| `LOGGER_TOKEN` | não | token `klp_` do projeto/ambiente |
+| `INSTANCE_NAME` | não | nome da instância; padrão `INSTANCE_TYPE` |
+
+- `LOGGER_URL` e `LOGGER_TOKEN` devem ser definidos juntos; sem eles, o envio remoto fica desabilitado e o bot continua funcionando apenas com o console e os webhooks.
+- Os comandos/componentes são registrados como `discord.command`/`discord.component`, com `execution_ms` medido no handler da interação. Falhas usam `discord.command.failed`/`discord.component.failed`; rejeições usam `.rejected`.
+- Os webhooks do Discord continuam para avisos operacionais (WARN), comandos, inicialização da instância, DNS switch e eventos de failover (takeover/handback). Logs `ERROR` de aplicação vão para o kami-logger; o webhook de erro antigo só é usado como fallback quando o logger remoto está desabilitado.
+- Para um log sair somente no console (sem webhook e sem kami-logger), use `remote: false` no contexto: `logger.info('debug', { event: 'debug.local', remote: false })`.
+- Nenhum token, senha de ficha ou código de vínculo é enviado: o produtor redige senhas/códigos de opções sensíveis e o logger mascara os campos restantes.
+
 ## BOT para Discord — Slash Commands
 
 Devido a mudanças que foram realizadas pelo Discord, somente comandos `/` estão disponíveis para os usuários.
 
 ## Projetos relacionados
 
-- **[Kami-Site](https://github.com/alanfilho184/Kami-Site)** — repositório do site
+- **[kami-site](https://github.com/alanfilho184/Kami-Site)** — repositório do site
 
 **Adicione o Kami ao seu servidor** **[clicando aqui](https://kamiapp.com.br/convite)**.
 

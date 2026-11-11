@@ -118,7 +118,7 @@ describe('/delete_sheet confirmacao ($a$)', () => {
         expect(lastWebhookBody(mockRest)).toEqual(expect.objectContaining({ content: expect.any(String) }));
     });
 
-    it('confirmar apaga mensagens sincronizadas (irt)', async () => {
+    it('confirmar desativa os vínculos IRT antes de apagar a ficha', async () => {
         mockDb.irt_sheets.findMany.mockResolvedValue([
             { id: 7, sheet_id: 10, user_id: 1, msg_id: '111111111111111111', channel_id: '222222222222222222' }
         ]);
@@ -126,13 +126,15 @@ describe('/delete_sheet confirmacao ($a$)', () => {
 
         await postCommandAndWaitReply(app, buildComponentInteraction({ componentId: confirmId }));
 
-        // delete roda em paralelo ao patch de confirmação — espera determinística
-        await waitForCall(mockRest.delete);
-        expect(mockRest.delete).toHaveBeenCalledWith(
-            expect.stringContaining('/channels/222222222222222222/messages/111111111111111111')
-        );
+        // A mensagem não é apagada; o botão é removido e o vínculo do banco
+        // é removido antes do delete da ficha (FK RESTRICT).
         await waitForCall(mockDb.irt_sheets.deleteMany);
-        expect(mockDb.irt_sheets.deleteMany).toHaveBeenCalled();
+        expect(mockRest.patch).toHaveBeenCalledWith(
+            expect.stringContaining('/channels/222222222222222222/messages/111111111111111111'),
+            expect.objectContaining({ body: expect.objectContaining({ components: [] }) })
+        );
+        expect(mockRest.delete).not.toHaveBeenCalled();
+        expect(mockDb.sheets.delete).toHaveBeenCalled();
     }, 20000);
 
     it('cancelar desabilita os botoes', async () => {

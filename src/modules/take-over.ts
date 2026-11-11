@@ -6,11 +6,7 @@ import botStatus from './bot-status';
 import CloudflareDns from './cloudflare-dns';
 import type { DnsApplyResult, DnsRecordConfig, DnsTarget } from './cloudflare-dns';
 import { isAutomaticDnsEnabled } from './dns-policy';
-import {
-    higherPriorityRoles,
-    pickHandbackTarget,
-    type InstanceRole
-} from '../types/instance';
+import { higherPriorityRoles, pickHandbackTarget, type InstanceRole } from '../types/instance';
 import { ActivityType } from 'discord.js';
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
@@ -44,13 +40,15 @@ class TakeOver {
     private pendingDnsTarget: DnsTarget | null = null;
     private pendingDnsRetryAt: number = 0;
     private dnsRetryDelay: number = ms('1m');
+    private interval: NodeJS.Timeout | null = null;
 
     constructor() {
         this.role = config.INSTANCE_TYPE;
         this.peers = this.buildPeers();
         this.failoverEnabled =
             this.role !== 'primary' &&
-            this.peers.every(peer => Boolean(peer.statusUrl && peer.apiToken));
+            this.peers.every(peer => Boolean(peer.statusUrl && peer.apiToken)) &&
+            this.automaticDnsEnabled;
 
         if (process.env.NODE_ENV === 'test') {
             return;
@@ -60,9 +58,16 @@ class TakeOver {
         this.initializeDns();
 
         void this.initialize();
-        setInterval(() => {
+        this.interval = setInterval(() => {
             void this.decideOnTakeOver();
         }, ms('1m'));
+    }
+
+    public stop(): void {
+        if (this.interval) {
+            clearInterval(this.interval);
+            this.interval = null;
+        }
     }
 
     private get dnsTarget(): DnsTarget {
@@ -79,21 +84,39 @@ class TakeOver {
 
     private logConfiguration(): void {
         if (this.role === 'primary') {
-            logger.logText('INFO', 'Failover role: primary (take-over disabled)');
+            logger.info('Failover role: primary (take-over disabled)', {
+                event: 'failover.config',
+                instance_role: this.role
+            });
+            return;
+        }
+
+        if (!this.automaticDnsEnabled) {
+            logger.info('Automatic DNS failover is disabled outside production; take-over is disarmed', {
+                event: 'failover.dns.disabled',
+                instance_role: this.role
+            });
             return;
         }
 
         const monitored = this.peers.map(peer => peer.role).join(', ') || 'none';
-        logger.logText('INFO', `Failover role: ${this.role}; monitoring: ${monitored}`);
+        logger.info(`Failover role: ${this.role}; monitoring: ${monitored}`, {
+            event: 'failover.config',
+            instance_role: this.role
+        });
 
         const missing = this.peers.filter(peer => !peer.statusUrl || !peer.apiToken);
 
         if (missing.length > 0) {
-            logger.logText(
-                'ERROR',
+            logger.error(
                 `Automatic failover is disabled: missing status URL/token for ${missing
                     .map(peer => peer.role)
-                    .join(', ')}`
+                    .join(', ')}`,
+                {
+                    event: 'failover.config.missing',
+                    instance_role: this.role,
+                    notifyDiscord: true
+                }
             );
         }
     }
@@ -105,9 +128,12 @@ class TakeOver {
 
         // A troca automática de DNS só roda em produção; o CLI (npm run dns:*) continua livre.
         if (!this.automaticDnsEnabled) {
-            logger.logText(
-                'INFO',
-                'Automatic DNS failover is disabled outside production; use "npm run dns:*" to switch manually'
+            logger.info(
+                'Automatic DNS failover is disabled outside production; use "npm run dns:*" to switch manually',
+                {
+                    event: 'failover.dns.disabled',
+                    instance_role: this.role
+                }
             );
             return;
         }
@@ -142,20 +168,23 @@ class TakeOver {
         });
 
         if (!this.dns.isConfigured) {
-            logger.logText(
-                'ERROR',
-                'Cloudflare DNS failover is not configured; automatic failover is disabled'
-            );
+            logger.error('Cloudflare DNS failover is not configured; automatic failover is disabled', {
+                event: 'failover.dns.config',
+                instance_role: this.role,
+                notifyDiscord: true
+            });
             this.dns = null;
             this.failoverEnabled = false;
             return;
         }
 
         if (!this.dns.hasTarget(this.dnsTarget)) {
-            logger.logText(
-                'ERROR',
-                `DNS target for "${this.dnsTarget}" is not configured; automatic failover is disabled`
-            );
+            logger.error(`DNS target for "${this.dnsTarget}" is not configured; automatic failover is disabled`, {
+                event: 'failover.dns.config',
+                instance_role: this.role,
+                failover_target: this.dnsTarget,
+                notifyDiscord: true
+            });
             this.dns = null;
             this.failoverEnabled = false;
         }
@@ -181,7 +210,11 @@ class TakeOver {
 
             await this.decideOnTakeOver();
         } catch (err) {
-            logger.logText('ERROR', `Failover initialization failed: ${this.errorMessage(err)}`);
+            logger.error(err, {
+                event: 'failover.initialization.error',
+                instance_role: this.role,
+                notifyDiscord: true
+            });
         }
     }
 
@@ -208,9 +241,13 @@ class TakeOver {
                     if (this.handoverSuccessCount >= HANDOVER_SUCCESSES_REQUIRED) {
                         await this.handOver(targetPeer);
                     } else {
-                        logger.logText(
-                            'INFO',
-                            `Higher-priority instance ${targetPeer.role} is online (${this.handoverSuccessCount}/${HANDOVER_SUCCESSES_REQUIRED}); waiting before DNS handback`
+                        logger.info(
+                            `Higher-priority instance ${targetPeer.role} is online (${this.handoverSuccessCount}/${HANDOVER_SUCCESSES_REQUIRED}); waiting before DNS handback`,
+                            {
+                                event: 'failover.handback.waiting',
+                                instance_role: this.role,
+                                failover_target: targetPeer.role
+                            }
                         );
                     }
                 } else {
@@ -247,7 +284,11 @@ class TakeOver {
 
             await this.takeOver();
         } catch (err) {
-            logger.logText('ERROR', `Failover check failed: ${this.errorMessage(err)}`);
+            logger.error(err, {
+                event: 'failover.check.error',
+                instance_role: this.role,
+                notifyDiscord: true
+            });
         } finally {
             this.isChecking = false;
         }
@@ -270,7 +311,7 @@ class TakeOver {
             onlinePeers.map(peer => peer.role)
         );
 
-        return target ? onlinePeers.find(peer => peer.role === target) ?? null : null;
+        return target ? (onlinePeers.find(peer => peer.role === target) ?? null) : null;
     }
 
     private async checkPeer(peer: FailoverPeer): Promise<boolean> {
@@ -335,13 +376,17 @@ class TakeOver {
 
             await this.ensureDns(targetPeer.role);
         } catch (err) {
-            logger.logText('ERROR', `DNS reconciliation failed: ${this.errorMessage(err)}`);
+            logger.error(err, {
+                event: 'failover.dns.reconcile_error',
+                instance_role: this.role,
+                notifyDiscord: true
+            });
         }
     }
 
-    private async ensureDns(target: DnsTarget): Promise<void> {
+    private async ensureDns(target: DnsTarget): Promise<boolean> {
         if (!this.dns || !this.dns.isConfigured) {
-            return;
+            return false;
         }
 
         const isRetry = this.pendingDnsTarget === target && this.pendingDnsRetryAt > 0;
@@ -352,8 +397,10 @@ class TakeOver {
             this.dnsRetryDelay = ms('1m');
         }
 
+        // O backoff evita martelar a API da Cloudflare quando ela está
+        // indisponível/limitando. Nesse caso o estado ativo não é confirmado.
         if (Date.now() < this.pendingDnsRetryAt) {
-            return;
+            return false;
         }
 
         try {
@@ -362,12 +409,20 @@ class TakeOver {
 
             if (result.ok) {
                 this.clearPendingDns();
-            } else {
-                this.scheduleDnsRetry(target, isRetry);
+                return true;
             }
-        } catch (err) {
-            logger.logText('ERROR', `DNS failover failed: ${this.errorMessage(err)}`);
+
             this.scheduleDnsRetry(target, isRetry);
+            return false;
+        } catch (err) {
+            logger.error(err, {
+                event: 'failover.dns.error',
+                instance_role: this.role,
+                failover_target: target,
+                notifyDiscord: true
+            });
+            this.scheduleDnsRetry(target, isRetry);
+            return false;
         }
     }
 
@@ -387,9 +442,14 @@ class TakeOver {
         const recordName = config.CLOUDFLARE_DNS_RECORD_NAME ?? 'DNS record';
 
         if (!result.ok) {
-            logger.logText(
-                'ERROR',
-                `DNS failover: failed to switch ${recordName} to ${target}: ${result.error ?? 'unknown error'}`
+            logger.error(
+                `DNS failover: failed to switch ${recordName} to ${target}: ${result.error ?? 'unknown error'}`,
+                {
+                    event: 'failover.dns.error',
+                    instance_role: this.role,
+                    failover_target: target,
+                    notifyDiscord: true
+                }
             );
             return;
         }
@@ -398,7 +458,14 @@ class TakeOver {
             logger.logText(
                 'WARN',
                 `DNS switch: ${recordName} -> ${result.desired.content} (${target}, ${result.action})`,
-                true
+                true,
+                {
+                    event: 'failover.dns.switch',
+                    instance_role: this.role,
+                    failover_target: target,
+                    dns_changed: result.changed,
+                    action: result.action
+                }
             );
         }
     }
@@ -437,7 +504,28 @@ class TakeOver {
             return;
         }
 
-        logger.logText('ERROR', this.takeOverMessage());
+        logger.error(this.takeOverMessage(), {
+            event: 'failover.takeover',
+            instance_role: this.role,
+            failover_target: this.dnsTarget,
+            notifyDiscord: true
+        });
+
+        // Só assumimos depois que o DNS realmente aponta para esta instância.
+        // Se a Cloudflare estiver fora, a tentativa fica pendente e o
+        // `takingOver` continua falso — evitando double-write de IRT.
+        const dnsOk = await this.ensureDns(this.dnsTarget);
+
+        if (!dnsOk) {
+            logger.warn('Takeover postponed: DNS switch is still pending', {
+                event: 'failover.takeover.pending',
+                instance_role: this.role,
+                failover_target: this.dnsTarget,
+                notifyDiscord: true
+            });
+            return;
+        }
+
         this.takingOver = true;
         this.handoverSuccessCount = 0;
         this.handoverTarget = null;
@@ -451,23 +539,35 @@ class TakeOver {
             ]
         });
         botStatus.enable();
-
-        await this.ensureDns(this.dnsTarget);
     }
 
     private async handOver(targetPeer: FailoverPeer): Promise<void> {
-        logger.logText('ERROR', this.handOverMessage(targetPeer));
+        logger.error(this.handOverMessage(targetPeer), {
+            event: 'failover.handback',
+            instance_role: this.role,
+            failover_target: targetPeer.role,
+            notifyDiscord: true
+        });
+
+        // Mantém o estado ativo (e o sync de IRT) até o DNS apontar de volta
+        // para o peer. Se a troca falhar, o próximo ciclo tenta novamente.
+        const dnsOk = await this.ensureDns(targetPeer.role);
+
+        if (!dnsOk) {
+            logger.warn('Handback postponed: DNS switch is still pending', {
+                event: 'failover.handback.pending',
+                instance_role: this.role,
+                failover_target: targetPeer.role,
+                notifyDiscord: true
+            });
+            return;
+        }
+
         this.takingOver = false;
         this.handoverSuccessCount = 0;
         this.handoverTarget = null;
         void botPresence.disable();
         botStatus.disable();
-
-        await this.ensureDns(targetPeer.role);
-    }
-
-    private errorMessage(error: unknown): string {
-        return error instanceof Error ? error.message : String(error);
     }
 }
 

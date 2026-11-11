@@ -10,6 +10,7 @@ import { ButtonStyle, Routes } from 'discord-api-types/v10';
 import rest from '../../configs/rest';
 import logger from '../../configs/logger';
 import { Command_Category } from '../../types/enums';
+import { deactivateIrtSheets } from '../../resources/utils/irt';
 
 export default {
     ownerOnly: false,
@@ -87,44 +88,42 @@ export default {
                 action: async (comp: Interaction) => {
                     comp.acknowledge();
 
-                    SheetController.deleteById(sheet.id)
-                        .then(() => {
-                            sheetNameCache.remove(int.kami_user!.id, sheetName);
+                    try {
+                        const irtSheets = (await SheetController.getIrtSheetBySheetId(sheet.id)) ?? [];
 
-                            SheetController.getIrtSheetBySheetId(sheet.id).then(async irtSheets => {
-                                if (irtSheets && irtSheets?.length > 0) {
-                                    for (let irtSheet of irtSheets) {
-                                        await rest
-                                            .delete(
-                                                Routes.channelMessage(`${irtSheet.channel_id}`, `${irtSheet.msg_id}`)
-                                            )
+                        // A FK de irt_sheets -> sheets é RESTRICT. Primeiro
+                        // desativamos os vínculos (removendo o botão das
+                        // mensagens e as linhas do banco); só então a ficha
+                        // pode ser apagada. As mensagens não são apagadas.
+                        await deactivateIrtSheets(irtSheets);
 
-                                            .catch(err => {
-                                                logger.logText('ERROR', `Error deleting IRT sheet message: ${err}`);
-                                            });
+                        await SheetController.deleteById(sheet.id);
+                        sheetNameCache.remove(int.kami_user!.id, sheetName);
 
-                                        await new Promise(r => setTimeout(r, 3000));
-                                    }
+                        await rest.patch(Routes.webhookMessage(int.application_id, comp.token, msg.id), {
+                            body: {
+                                content: localization(language, 'delete-sheet|sheet-deleted'),
+                                components: []
+                            },
+                            headers: {
+                                'Content-Type': 'application/json'
+                            }
+                        });
+                    } catch (err) {
+                        logger.error(err, { event: 'sheet.delete.error', sheet_id: sheet.id });
 
-                                    SheetController.deleteAllIrtSheetBySheetId(sheet.id);
-                                }
-                            });
-
-                            rest.patch(Routes.webhookMessage(int.application_id, comp.token, msg.id), {
+                        await rest
+                            .patch(Routes.webhookMessage(int.application_id, comp.token, msg.id), {
                                 body: {
-                                    content: localization(language, 'delete-sheet|sheet-deleted'),
+                                    content: localization(language, 'delete-sheet|delete-error'),
                                     components: []
                                 },
                                 headers: {
                                     'Content-Type': 'application/json'
                                 }
-                            }).catch(err => {
-                                logger.logText('ERROR', `Error updating cancel new sheet message: ${err}`);
-                            });
-                        })
-                        .catch(err => {
-                            logger.logText('ERROR', `Error deleting sheet: ${err}`);
-                        });
+                            })
+                            .catch(() => undefined);
+                    }
                 },
                 singleUse: true,
                 respondOnlyToUserId: int.user.id

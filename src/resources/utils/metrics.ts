@@ -118,10 +118,16 @@ class Metrics {
 
         const direction = median < 0 ? 'atrasado' : 'adiantado';
         try {
-            logger.logText(
-                'WARN',
+            logger.warn(
                 `Relógio local ${direction} em relação ao Discord (mediana crua: ${Math.round(median)} ms). ` +
-                    'A métrica de latência de entrada foi desativada — sincronize o relógio com NTP/chrony.'
+                    'A métrica de latência de entrada foi desativada — sincronize o relógio com NTP/chrony.',
+                {
+                    event: 'clock.skew',
+                    action: direction,
+                    clock_offset_ms: Math.round(median),
+                    execution_ms: Math.abs(Math.round(median)),
+                    remote: false
+                }
             );
         } catch {
             // nunca deixar o log derrubar o status

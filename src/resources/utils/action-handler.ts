@@ -46,7 +46,11 @@ class ActionHandler {
                         return action.run(...args);
                     }
                 } catch (err) {
-                    logger.logText('WARN', `Error executing action "${id}": ${err}`);
+                    logger.warn(`Error executing action "${id}"`, {
+                        event: 'component.action.error',
+                        action: id,
+                        error: err
+                    });
                 }
             }
         }

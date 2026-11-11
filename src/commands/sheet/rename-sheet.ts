@@ -152,12 +152,16 @@ export default {
                     }
 
                     SheetController.renameById(sheet.id, newSheetName)
-                        .then(() => {
+                        .then(updatedSheet => {
                             sheetNameCache.remove(int.kami_user!.id, sheetName);
-                            sheetNameCache.add(int.kami_user!.id, newSheetName);
+                            sheetNameCache.upsert(int.kami_user!.id, sheet.id, newSheetName);
 
                             syncSheet({
-                                sheet: { ...sheet, sheet_name: newSheetName },
+                                sheet: {
+                                    ...(updatedSheet ?? sheet),
+                                    sheet_name: newSheetName,
+                                    last_use: updatedSheet?.last_use ?? new Date()
+                                },
                                 language: language,
                                 user: int.kami_user as User & User_Config
                             });

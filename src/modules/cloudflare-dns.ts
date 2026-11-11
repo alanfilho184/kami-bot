@@ -57,6 +57,28 @@ const VALID_TYPES = new Set<string>(['A', 'AAAA', 'CNAME']);
 
 const sleep = (time: number) => new Promise<void>(resolve => setTimeout(resolve, time));
 
+function retryAfterMs(headers: Headers | undefined): number | null {
+    const value = headers?.get?.('retry-after');
+
+    if (!value) {
+        return null;
+    }
+
+    const seconds = Number(value);
+
+    if (Number.isFinite(seconds) && seconds >= 0) {
+        return seconds * 1000;
+    }
+
+    const date = Date.parse(value);
+
+    if (Number.isFinite(date)) {
+        return Math.max(0, date - Date.now());
+    }
+
+    return null;
+}
+
 class CloudflareDnsError extends Error {
     constructor(
         message: string,
@@ -421,7 +443,11 @@ export class CloudflareDns {
                 `Cloudflare API returned HTTP ${response.status}`;
 
             if (transient && retryable && attempt < MAX_ATTEMPTS) {
-                await sleep(RETRY_DELAYS[attempt - 1] ?? RETRY_DELAYS[RETRY_DELAYS.length - 1]);
+                const requestedDelay = retryAfterMs(response.headers);
+                const fallbackDelay = RETRY_DELAYS[attempt - 1] ?? RETRY_DELAYS[RETRY_DELAYS.length - 1];
+                const delay = Math.min(Math.max(requestedDelay ?? fallbackDelay, fallbackDelay), 60_000);
+
+                await sleep(delay);
                 return this.request<T>(url, init, attempt + 1);
             }
 

@@ -42,10 +42,10 @@ class BotStatus {
 
         this.enabled = true;
 
-        void this.getDbData();
+        void this.refreshDbData();
         this.timers.push(
             setInterval(() => {
-                void this.getDbData();
+                void this.refreshDbData();
             }, ms('10m'))
         );
 
@@ -102,6 +102,14 @@ class BotStatus {
             memory: process.memoryUsage().rss / (1024 * 1024), // MB
             cpu: percent.toFixed(2)
         };
+    }
+
+    private async refreshDbData(): Promise<void> {
+        try {
+            await this.getDbData();
+        } catch (err) {
+            logger.error(err, { event: 'bot.status.db_data_failed' });
+        }
     }
 
     async getDbData() {
@@ -374,7 +382,7 @@ class BotStatus {
                 apiLatency: times.length > 0 ? times[Math.floor(times.length / 2)] : 0
             };
         } catch (err) {
-            logger.logText('ERROR', err);
+            logger.error(err, { event: 'bot.status.discord_data_failed' });
         }
     }
 
@@ -398,10 +406,16 @@ class BotStatus {
         metrics.setClockOffset(result.offsetMs, result.source);
 
         if (Math.abs(result.offsetMs) >= 10) {
-            logger.logText(
-                'INFO',
+            logger.info(
                 `Relógio local com desvio de ${Math.round(result.offsetMs)} ms (fonte: ${result.source}). ` +
-                    'O valor está sendo corrigido na métrica de latência de entrada.'
+                    'O valor está sendo corrigido na métrica de latência de entrada.',
+                {
+                    event: 'clock.offset',
+                    action: result.source,
+                    clock_offset_ms: Math.round(result.offsetMs),
+                    execution_ms: Math.abs(Math.round(result.offsetMs)),
+                    remote: false
+                }
             );
         }
     }
@@ -638,9 +652,7 @@ class BotStatus {
 
                     const botStatusEmbed = new EmbedBuilder();
                     botStatusEmbed.setColor(isContingency ? 0xff9900 : Number(config.EMBED_COLOR));
-                    botStatusEmbed.setTitle(
-                        isContingency ? `Status do Kami BOT (${roleTitle})` : 'Status do Kami BOT'
-                    );
+                    botStatusEmbed.setTitle(isContingency ? `Status do Kami BOT (${roleTitle})` : 'Status do Kami BOT');
                     botStatusEmbed.setDescription(
                         isContingency ? contingencyMessage : 'Monitoramento em tempo real do BOT e da comunidade.'
                     );
@@ -682,7 +694,7 @@ class BotStatus {
                         cycleMs: encodeMs + uploadMs
                     };
                 } catch (err) {
-                    logger.logText('ERROR', err);
+                    logger.error(err, { event: 'bot.status.update_failed' });
                 } finally {
                     this.updating = false;
                 }

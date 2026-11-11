@@ -59,6 +59,38 @@ beforeEach(() => {
 });
 
 describe('/sheet_rename_section', () => {
+    it('bloqueia renomear seção especial e encaminha para o site', async () => {
+        mockDb.sheets.findFirst.mockResolvedValue(
+            sheetWithSection({
+                attributes: {
+                    sections: [
+                        {
+                            name: 'Identidade',
+                            position: 0,
+                            type: 2,
+                            attributes: [{ name: 'Nome', value: 'Lyra', position: 0, type: 0 }]
+                        }
+                    ]
+                }
+            })
+        );
+
+        await postCommandAndWaitReply(
+            app,
+            buildCommandInteraction({
+                name: 'sheet_rename_section',
+                options: [
+                    { name: 'sheet_name', type: 3, value: 'Test Sheet' },
+                    { name: 'section', type: 3, value: 'Identidade' },
+                    { name: 'new_name', type: 3, value: 'Ficha' }
+                ]
+            })
+        );
+
+        expect(mockDb.sheets.update).not.toHaveBeenCalled();
+        expect(lastWebhookBody(mockRest).content).toContain('só pode ser editada no site');
+    });
+
     it('caso valido pede confirmacao', async () => {
         mockDb.sheets.findFirst.mockResolvedValue(sheetWithSection());
 

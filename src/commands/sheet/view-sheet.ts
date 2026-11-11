@@ -5,10 +5,25 @@ import { InteractionResponseFlags } from 'discord-interactions';
 import SheetController from '../../controllers/sheet.controller';
 import UserController from '../../controllers/user.controller';
 import SheetServices from '../../services/sheet.services';
-import { createSheetEmbed } from './sheet-send';
+import { buildSheetTooComplexContent, createSheetEmbed, SheetTooComplexError } from './sheet-send';
 
 const snowflakeRegex = /^\d{17,19}$/;
 const kamiIdRegex = /^\d+$/;
+
+function buildEmbeds(
+    sheet: Sheet,
+    language: Available_Languages
+): { embeds: ReturnType<typeof createSheetEmbed>; tooComplex?: never } | { embeds?: never; tooComplex: string } {
+    try {
+        return { embeds: createSheetEmbed(sheet, language) };
+    } catch (err) {
+        if (err instanceof SheetTooComplexError) {
+            return { tooComplex: buildSheetTooComplexContent(sheet, language) };
+        }
+
+        throw err;
+    }
+}
 
 export default {
     ownerOnly: false,
@@ -120,19 +135,27 @@ export default {
         } else {
             if (sheet.user_id === int.kami_user?.id) {
                 sheet.user = int.kami_user!;
-                const embeds = createSheetEmbed(sheet, language);
+                const result = buildEmbeds(sheet, language);
+
+                if (result.tooComplex) {
+                    return int.reply({ content: result.tooComplex });
+                }
 
                 return int.reply({
                     content: localization(language, 'sheet-view|own-sheet'),
-                    embeds: embeds
+                    embeds: result.embeds
                 });
             }
 
             if (sheet.is_public) {
                 sheet.user = user;
+                const result = buildEmbeds(sheet, language);
 
-                const embeds = createSheetEmbed(sheet, language);
-                return int.reply({ embeds: embeds });
+                if (result.tooComplex) {
+                    return int.reply({ content: result.tooComplex });
+                }
+
+                return int.reply({ embeds: result.embeds });
             } else {
                 if (!password) {
                     return int.reply({
@@ -148,9 +171,13 @@ export default {
                     });
                 } else {
                     sheet.user = user;
+                    const result = buildEmbeds(sheet, language);
 
-                    const embeds = createSheetEmbed(sheet, language);
-                    return int.reply({ embeds: embeds });
+                    if (result.tooComplex) {
+                        return int.reply({ content: result.tooComplex });
+                    }
+
+                    return int.reply({ embeds: result.embeds });
                 }
             }
         }

@@ -27,7 +27,9 @@ const db = {
     announcements_seen: { findMany: jest.fn(), upsert: jest.fn() },
     $queryRaw: jest.fn(),
     $queryRawUnsafe: jest.fn(),
-    $connect: jest.fn()
+    $executeRaw: jest.fn(),
+    $connect: jest.fn(),
+    $transaction: jest.fn(async callback => callback(db))
 };
 
 async function verifyConnection() {

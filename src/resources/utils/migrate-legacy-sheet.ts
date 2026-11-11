@@ -30,7 +30,7 @@ export default async function migrateLegacySheet(sheetIdOrSheet: number | Sheet)
     try {
         return await SheetController.updateById(sheet.id, sheet);
     } catch (err) {
-        logger.logText('ERROR', `Error migrating legacy sheet with ID ${sheet.id}: ${err}`);
+        logger.error(err, { event: 'sheet.migrate.error', sheet_id: sheet.id });
         return sheet;
     }
 }

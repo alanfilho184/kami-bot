@@ -71,6 +71,7 @@ function withGuild(opts, payload) {
     };
     payload.channel = { id: opts.channelId ?? defaults.channelId, type: 0 };
     payload.app_permissions = '0';
+    payload.authorizing_integration_owners = { 0: guildId };
     payload.member = { roles: [], user: discordUser(opts) };
     return payload;
 }
@@ -100,6 +101,7 @@ function buildCommandInteraction(opts) {
 
     if (opts.inDM) {
         payload.user = discordUser(opts);
+        payload.authorizing_integration_owners = { 1: payload.user.id };
         return payload;
     }
 
@@ -126,6 +128,7 @@ function buildComponentInteraction(opts) {
 
     if (opts.inDM) {
         payload.user = discordUser(opts);
+        payload.authorizing_integration_owners = { 1: payload.user.id };
         return payload;
     }
 
@@ -154,6 +157,7 @@ function buildModalInteraction(opts) {
 
     if (opts.inDM) {
         payload.user = discordUser(opts);
+        payload.authorizing_integration_owners = { 1: payload.user.id };
         return payload;
     }
 
@@ -181,14 +185,15 @@ function buildAutocompleteInteraction(opts) {
 
     if (opts.inDM) {
         payload.user = discordUser(opts);
+        payload.authorizing_integration_owners = { 1: payload.user.id };
         return payload;
     }
 
     return withGuild(opts, payload);
 }
 
-/** Interação de PING (o bot responde PONG). Inclui usuário/guild por padrão,
- *  pois a rota chama loadUser() antes de checar o tipo. */
+/** Interação de PING (o bot responde PONG). `minimal` reproduz o payload
+ *  real do Discord, que não traz user/guild. */
 function buildPingInteraction(opts = {}) {
     const payload = {
         id: snowflake(),
@@ -201,8 +206,13 @@ function buildPingInteraction(opts = {}) {
         guild_locale: opts.locale ?? defaults.locale
     };
 
+    if (opts.minimal) {
+        return payload;
+    }
+
     if (opts.inDM) {
         payload.user = discordUser(opts);
+        payload.authorizing_integration_owners = { 1: payload.user.id };
         return payload;
     }
 

@@ -1,9 +1,8 @@
 import { Interaction } from '../resources/utils/interaction-handler';
 import SheetController from '../controllers/sheet.controller';
-import rest from '../configs/rest';
-import { Routes } from 'discord-api-types/v10';
 import { localization } from '../resources/localization';
 import { Command_Category } from '../types/enums';
+import { deactivateIrtSheet } from '../resources/utils/irt';
 
 export default {
     name: 'deactivate-irt',
@@ -14,22 +13,15 @@ export default {
         const irtSheet = await SheetController.getIrtSheetByMsgId(int.component!.args);
 
         if (irtSheet === null || irtSheet.user_id !== int.kami_user!.id) {
-            return;
-        } else {
-            await SheetController.deleteIrtSheetByMsgId(int.component!.args);
-
-            await rest.patch(Routes.channelMessage(`${irtSheet?.channel_id}`, `${irtSheet?.msg_id}`), {
-                body: {
-                    components: []
-                },
-                headers: {
-                    'Content-Type': 'application/json'
-                }
-            });
-
             return await int.reply({
-                content: localization(language, 'sheet-send|irt-deactivated')
+                content: localization(language, 'sheet-send|irt-not-found')
             });
         }
+
+        await deactivateIrtSheet(irtSheet);
+
+        return await int.reply({
+            content: localization(language, 'sheet-send|irt-deactivated')
+        });
     }
 };

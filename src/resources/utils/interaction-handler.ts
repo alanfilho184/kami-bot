@@ -6,15 +6,18 @@ import rest from '../../configs/rest';
 import logger from '../../configs/logger';
 import { users_config } from '@prisma/client';
 import UserController from '../../controllers/user.controller';
+import { performance } from 'node:perf_hooks';
 
 const DISCORD_EPOCH = 1420070400000;
 
 class Interaction {
     app_permissions: Snowflake;
     application_id: Snowflake;
+    authorizing_integration_owners: Record<string, Snowflake>;
     channel: {
         id: Snowflake;
         type: number;
+        name?: string;
         recipients: {
             avatar: string;
             discriminator: string;
@@ -90,9 +93,11 @@ class Interaction {
         args: string;
     };
     res: Pick<Response, 'json'>;
+    private commandStartedAt: number | null = null;
     constructor(interaction: Interaction, res: Response) {
         this.app_permissions = interaction.app_permissions;
         this.application_id = interaction.application_id;
+        this.authorizing_integration_owners = interaction.authorizing_integration_owners ?? {};
         this.channel = interaction.channel;
         this.channel_id = interaction.channel_id;
         this.context = interaction.context;
@@ -151,6 +156,20 @@ class Interaction {
         }
     }
 
+    startCommandTimer(): void {
+        this.commandStartedAt = performance.now();
+    }
+
+    stopCommandTimer(): number | null {
+        if (this.commandStartedAt === null) {
+            return null;
+        }
+
+        const executionMs = Math.round(performance.now() - this.commandStartedAt);
+        this.commandStartedAt = null;
+        return executionMs;
+    }
+
     async loadUser() {
         let user = await UserController.getByDiscordId(this.user.id);
 
@@ -173,6 +192,7 @@ class Interaction {
             avatar: user.avatar || this.user.avatar,
             email: user.email || '',
             password: '',
+            has_site_account: user.has_site_account === true,
             is_beta: user.is_beta,
             is_premium: user.is_premium,
             last_use: user.last_use,
@@ -269,6 +289,16 @@ class Interaction {
         return this.guild_id === undefined;
     }
 
+    hasGuildInstall() {
+        const owners = this.authorizing_integration_owners;
+
+        if (owners && Object.keys(owners).length > 0) {
+            return Boolean(owners['0']);
+        }
+
+        return this.inGuild();
+    }
+
     isMessageComponent() {
         return this.type === InteractionType.MESSAGE_COMPONENT;
     }
@@ -298,7 +328,7 @@ class Interaction {
 
             return Available_Languages['en-us'];
         } catch (err) {
-            logger.logText('ERROR', err);
+            logger.error(err, { event: 'language.resolve_error' });
             return Available_Languages['en-us'];
         }
     }

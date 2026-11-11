@@ -6,11 +6,13 @@ import { Attribute_Type } from '../types/enums';
 
 class SheetServices {
     //public static textRegex: RegExp = /^[a-zA-ZáàâãéèêíïóôõöúçñÁÀÂÃÉÈÍÏÓÔÕÖÚÇÑ+#@$%&*{}()/.,;:?!'"-_| ]{1,}(?: [a-zA-ZáàâãéèêíïóôõöúçñÁÀÂÃÉÈÍÏÓÔÕÖÚÇÑ+#@$%&*{}()/.,;:?!'"-_| ]+){0,}$/gim;
+    // Sem a flag `g`: estes regex são usados com `.test()` várias vezes e o
+    // `lastIndex` persistente fazia validações alternarem entre true/false.
     public static textRegex: RegExp =
-        /([a-zA-Z0-9]+\(([a-zA-Z0-9\s<>.,;:?!@#$%¨&*()_+-={}\[\]\\|/?°ºª``^~]+\)))|((if|IF|or|OR|xor|XOR)(((\s+\(("|')([a-zA-Z0-9\s<>.,;:?!@#$%¨&*()_+-={}\[\]\\|/?°ºª``^~]+))("|')\))|(\s("|')([a-zA-Z0-9]+)("|'))))|(select|SELECT|insert|INSERT|update|UPDATE|delete|DELETE)|((\s+\*+\s)|(.+)|(\s+[a-zA-Z0-9]+))(from|FROM|into|INTO)((\s+[a-zA-Z0-9]\w+))|\s+(where|WHERE)/g;
-    public static numberRegex: RegExp = /^(-?[0-9]+)$/gim;
-    public static positiveNumberRegex: RegExp = /^([0-9]+)$/gim;
-    public static imageRegex: RegExp = /https?:\/\/.*\.(?:png|jpg|jpeg|gif|svg|webp)/gi;
+        /([a-zA-Z0-9]+\(([a-zA-Z0-9\s<>.,;:?!@#$%¨&*()_+-={}\[\]\\|/?°ºª``^~]+\)))|((if|IF|or|OR|xor|XOR)(((\s+\(("|')([a-zA-Z0-9\s<>.,;:?!@#$%¨&*()_+-={}\[\]\\|/?°ºª``^~]+))("|')\))|(\s("|')([a-zA-Z0-9]+)("|'))))|(select|SELECT|insert|INSERT|update|UPDATE|delete|DELETE)|((\s+\*+\s)|(.+)|(\s+[a-zA-Z0-9]+))(from|FROM|into|INTO)((\s+[a-zA-Z0-9]\w+))|\s+(where|WHERE)/im;
+    public static numberRegex: RegExp = /^(-?[0-9]+)$/im;
+    public static positiveNumberRegex: RegExp = /^([0-9]+)$/im;
+    public static imageRegex: RegExp = /https?:\/\/.*\.(?:png|jpg|jpeg|gif|svg|webp)/i;
 
     static prepareNewSheet(name: string, userId: number): Prepared_Sheet {
         const newSheet: Prepared_Sheet = {

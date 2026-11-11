@@ -17,6 +17,7 @@ import logger from '../../configs/logger';
 import { Sheet_Name } from '../../types/validations';
 import syncSheet from '../../resources/utils/sync-sheet';
 import migrateLegacySheet from '../../resources/utils/migrate-legacy-sheet';
+import { buildSheetSiteUrl, isSpecialSection } from '../../resources/utils/sheet-site';
 
 export default {
     ownerOnly: false,
@@ -179,7 +180,7 @@ export default {
         if (!sheet) {
             const sheetCount = await SheetController.countSheetsByUserId(int.kami_user?.id!);
 
-            if (sheetCount >= 5 && int.kami_user?.is_premium === false) {
+            if (sheetCount >= 30 && int.kami_user?.is_premium === false) {
                 return int.reply({
                     content: localization(language, 'sheet|sheet-limit-reached')
                 });
@@ -243,7 +244,7 @@ export default {
                     const newSheet = SheetServices.prepareNewSheet(newSheetName, int.kami_user?.id!);
                     sheet = await SheetController.create(newSheet);
 
-                    sheetNameCache.add(int.kami_user?.id!, sheet.sheet_name);
+                    sheetNameCache.add(int.kami_user?.id!, sheet.sheet_name, sheet.id);
 
                     rest.patch(Routes.webhookMessage(int.application_id, comp.token, msg.id), {
                         body: {
@@ -306,6 +307,30 @@ export default {
             sheet = (await migrateLegacySheet(sheet)) ?? sheet;
         }
 
+        const existingSection = sheet.attributes.sections.find(s => s.name === section);
+
+        if (existingSection && isSpecialSection(existingSection)) {
+            return int.reply({
+                content: localization(language, 'sheet|edit-on-site', [
+                    { replace: '$url$', value: buildSheetSiteUrl(sheet) }
+                ])
+            });
+        }
+
+        const existingAttribute = existingSection?.attributes.find(a => a.name === attribute);
+
+        if (
+            existingAttribute &&
+            (Number(existingAttribute.type) === Attribute_Type.STATUS ||
+                Number(existingAttribute.type) === Attribute_Type.TABLE)
+        ) {
+            return int.reply({
+                content: localization(language, 'sheet|attribute-edit-on-site', [
+                    { replace: '$url$', value: buildSheetSiteUrl(sheet) }
+                ])
+            });
+        }
+
         let validatedSheet = await SheetServices.validateModification(
             sheet,
             componentType,
@@ -331,6 +356,9 @@ export default {
                 });
             }
         } else {
+            // A mudança de tipo não invalida a posição no layout do site:
+            // span/rows continuam válidos. Remover a entrada faria a ficha
+            // perder o posicionamento configurado no site.
             await SheetController.updateById(sheet.id, validatedSheet);
             // commands.get('sheet_send')!.run(int, language);
 

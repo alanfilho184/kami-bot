@@ -11,7 +11,11 @@ enum Available_Languages {
 
 enum Section_Type {
     STANDARD = 0,
-    DESCRIPTION = 1
+    DESCRIPTION = 1,
+    HEADER = 2,
+    STATUS = 3,
+    GALLERY = 4,
+    TABLE = 5
 }
 
 enum Attribute_Type {
@@ -19,7 +23,9 @@ enum Attribute_Type {
     NUMBER = 1,
     IMAGE = 2,
     LIST = 3,
-    BAR = 4
+    BAR = 4,
+    STATUS = 5,
+    TABLE = 6
 }
 
 enum Macro_Type {

@@ -22,7 +22,7 @@ translationFiles.forEach(translationPathString => {
         const langKey = `${translation['language']}`.toLowerCase().replace('_', '-');
         languages[langKey] = { ...languages[langKey], ...translation };
     } catch (err) {
-        logger.logText('ERROR', `Failed to load localization file: ${normalizedPath} - ${err}`);
+        logger.error(err, { event: 'localization.load_failed', action: normalizedPath });
     }
 });
 
@@ -36,7 +36,8 @@ export function localization(
     replaces?: { replace: string; value: string | number }[]
 ) {
     try {
-        let languageNormalized = language.toLowerCase().replace('_', '-');
+        const requestedLanguage = `${language ?? 'pt-br'}`.toLowerCase().replace('_', '-');
+        const languageNormalized = languages[requestedLanguage] ? requestedLanguage : 'pt-br';
         let translation = languages[languageNormalized][key];
 
         if (Array.isArray(translation)) {
@@ -50,14 +51,22 @@ export function localization(
         }
 
         if (translation === undefined) {
-            logger.logText('ERROR', `Localization not found: ${languageNormalized} - ${key} - ${replaces}`);
+            logger.error(`Localization not found: ${languageNormalized} - ${key}`, {
+                event: 'localization.missing',
+                action: key,
+                language: languageNormalized
+            });
             return 'Localization error';
         }
 
         return translation;
     } catch (error) {
-        logger.logText('WARN', `Localization error: ${language} - ${key} - ${replaces}`);
-        logger.logText('ERROR', error);
+        logger.warn(`Localization error: ${language} - ${key}`, {
+            event: 'localization.error',
+            action: key,
+            language
+        });
+        logger.error(error, { event: 'localization.error', action: key, language });
         return 'Localization error';
     }
 }

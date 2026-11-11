@@ -60,9 +60,12 @@ class Announcements {
                     }
 
                     if (!announcement.repeat_interval_hours || announcement.repeat_interval_hours <= 0) {
-                        logger.logText(
-                            'WARN',
-                            `Announcement ${announcement.id} is INTERVAL but has no valid repeat_interval_hours`
+                        logger.warn(
+                            `Announcement ${announcement.id} is INTERVAL but has no valid repeat_interval_hours`,
+                            {
+                                event: 'announcement.interval_invalid',
+                                action: String(announcement.id)
+                            }
                         );
                         return false;
                     }
@@ -92,7 +95,7 @@ class Announcements {
 
             await AnnouncementController.markSeen(userId, chosen.id);
         } catch (err) {
-            logger.logText('ERROR', `Failed to send announcement: ${err}`);
+            logger.error(err, { event: 'announcement.send_failed' });
         }
     }
 
@@ -108,9 +111,13 @@ class Announcements {
             content[normalizedLanguage] ?? content['pt-br'] ?? content['en-us'] ?? Object.values(content)[0];
 
         if (!localization || typeof localization.title !== 'string' || typeof localization.description !== 'string') {
-            logger.logText(
-                'WARN',
-                `Announcement ${announcement.id} has invalid content for language "${normalizedLanguage}"`
+            logger.warn(
+                `Announcement ${announcement.id} has invalid content for language "${normalizedLanguage}"`,
+                {
+                    event: 'announcement.invalid_content',
+                    action: String(announcement.id),
+                    language: normalizedLanguage
+                }
             );
             return null;
         }

@@ -35,4 +35,13 @@ describe('PING (HTTP puro, sem chamada externa)', () => {
         expect(res.status).toBe(200);
         expect(res.body).toEqual({ type: InteractionResponseType.PONG });
     });
+
+    it('responde PONG para o payload mínimo real do Discord (sem user/guild)', async () => {
+        const interaction = buildPingInteraction({ minimal: true });
+
+        const res = await postSignedInteraction(app, interaction);
+
+        expect(res.status).toBe(200);
+        expect(res.body).toEqual({ type: InteractionResponseType.PONG });
+    });
 });
