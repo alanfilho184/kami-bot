@@ -1,6 +1,6 @@
 {
     "name": "kami-bot-http",
-    "version": "5.4.0",
+    "version": "5.4.1",
     "main": "server.js",
     "scripts": {
         "start": "node dist/app.js",

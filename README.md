@@ -62,6 +62,7 @@ O bot envia os eventos para o `kami-logger` por Socket.IO. O projeto no logger �
 | `INSTANCE_NAME` | não | nome da instância; padrão `INSTANCE_TYPE` |
 
 - `LOGGER_URL` e `LOGGER_TOKEN` devem ser definidos juntos; sem eles, o envio remoto fica desabilitado e o bot continua funcionando apenas com o console e os webhooks.
+- `LOGGER_URL` aceita `http` ou `https`; endereços internos via Tailscale/rede local podem usar `http`.
 - Os comandos/componentes são registrados como `discord.command`/`discord.component`, com `execution_ms` medido no handler da interação. Falhas usam `discord.command.failed`/`discord.component.failed`; rejeições usam `.rejected`.
 - Os webhooks do Discord continuam para avisos operacionais (WARN), comandos, inicialização da instância, DNS switch e eventos de failover (takeover/handback). Logs `ERROR` de aplicação vão para o kami-logger; o webhook de erro antigo só é usado como fallback quando o logger remoto está desabilitado.
 - Para um log sair somente no console (sem webhook e sem kami-logger), use `remote: false` no contexto: `logger.info('debug', { event: 'debug.local', remote: false })`.

@@ -166,12 +166,8 @@ if (!!config.LOGGER_URL !== !!config.LOGGER_TOKEN) {
     validationErrors.push('LOGGER_URL e LOGGER_TOKEN devem ser definidos juntos');
 }
 
-if (config.LOGGER_URL) {
-    if (!isValidHttpUrl(config.LOGGER_URL)) {
-        validationErrors.push('LOGGER_URL deve ser uma URL http(s) válida');
-    } else if (config.NODE_ENV === 'production' && new URL(config.LOGGER_URL).protocol !== 'https:') {
-        validationErrors.push('LOGGER_URL deve usar https em produção');
-    }
+if (config.LOGGER_URL && !isValidHttpUrl(config.LOGGER_URL)) {
+    validationErrors.push('LOGGER_URL deve ser uma URL http(s) válida');
 }
 
 if (config.LOGGER_TOKEN && !config.LOGGER_TOKEN.startsWith('klp_')) {
