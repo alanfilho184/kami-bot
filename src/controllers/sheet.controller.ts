@@ -319,7 +319,11 @@ export default class SheetController {
         limit: number | null
     ): Promise<'created' | 'limit'> {
         return db.$transaction(async tx => {
-            await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`sheet:irt:${sheetId}`}))`;
+            // pg_advisory_xact_lock() retorna void e o Prisma não desserializa
+            // colunas void em $queryRaw (P2010). O SELECT externo expõe só um int.
+            const lockKey = `sheet:irt:${sheetId}`;
+
+            await tx.$queryRaw`SELECT 1 AS locked FROM (SELECT pg_advisory_xact_lock(hashtext(${lockKey}))) AS lock`;
 
             if (limit !== null) {
                 const count = await tx.irt_sheets.count({

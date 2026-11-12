@@ -1,6 +1,6 @@
 {
     "name": "kami-bot-http",
-    "version": "5.4.1",
+    "version": "5.4.2",
     "main": "server.js",
     "scripts": {
         "start": "node dist/app.js",
@@ -43,7 +43,7 @@
         "discord.js": "^14.27.0",
         "dotenv": "^16.4.5",
         "express": "^5.2.1",
-        "glob": "^13.0.6",
+        "glob": "^14.0.6",
         "luxon": "^3.7.2",
         "os-utils": "^0.0.14",
         "prisma": "^6.2.1",
