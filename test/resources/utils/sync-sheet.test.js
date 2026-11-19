@@ -16,6 +16,7 @@ const syncSheet = syncSheetModule.default;
 const { MAX_IRT_SYNC_FAILURES } = syncSheetModule;
 const rest = require('../../../src/configs/rest').default;
 const db = require('../../../src/configs/database').default;
+const logger = require('../../../src/configs/logger').default;
 const {
     fakeSheetRow,
     fakeUserRow,
@@ -122,7 +123,52 @@ describe('syncSheet', () => {
 
         expect(result).toEqual({ updated: 0, failed: 1, skipped: false });
         expect(db.$executeRaw).toHaveBeenCalledTimes(1);
-        expect(db.$executeRaw.mock.calls[0][0].join('')).toContain('DELETE FROM irt_sheets');
+
+        const sql = db.$executeRaw.mock.calls[0][0].join('');
+
+        expect(sql).toContain('DELETE FROM irt_sheets');
+        // A remoção só acontece se o contador ainda estiver no limite: se outra
+        // instância sincronizou a mensagem com sucesso no meio do caminho, o
+        // contador foi zerado e o vínculo é válido.
+        expect(sql).toContain('sync_failures >=');
+    });
+
+    it('mantém o vínculo quando o contador foi zerado por outra sincronização', async () => {
+        db.irt_sheets.findMany.mockResolvedValue([
+            {
+                id: 7,
+                sheet_id: 10,
+                user_id: 1,
+                msg_id: '111111111111111111',
+                channel_id: '222222222222222222'
+            }
+        ]);
+        db.$queryRaw
+            .mockResolvedValueOnce([{ id: 7, last_synced_at: null }])
+            .mockResolvedValueOnce([{ sync_failures: MAX_IRT_SYNC_FAILURES }]);
+
+        // O banco só remove o vínculo se o contador ainda estiver no limite.
+        // O mock reproduz essa regra: sem a condição, a linha seria apagada.
+        db.$executeRaw.mockImplementation(async strings => {
+            const sql = Array.isArray(strings) ? strings.join('') : String(strings);
+
+            return sql.includes('sync_failures >=') ? 0 : 1;
+        });
+
+        rest.patch.mockRejectedValueOnce({ code: 10008, message: 'Unknown Message' });
+
+        const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+
+        const result = await syncSheet({ sheet, user, language: 'pt-br' });
+
+        expect(result).toEqual({ updated: 0, failed: 1, skipped: false });
+        expect(db.$executeRaw).toHaveBeenCalledTimes(1);
+        expect(warn).toHaveBeenCalledWith(
+            expect.any(String),
+            expect.objectContaining({ event: 'sheet.sync.link_kept' })
+        );
+
+        warn.mockRestore();
     });
 
     it('ignora ficha sem vínculo IRT', async () => {

@@ -42,6 +42,7 @@
     "sheet-send|description": "Description",
     "sheet-send|link": "Click here to view the sheet on the Kami website",
     "sheet-send|irt-limit-reached": "Synchronization limit reached, only up to 3 messages can be synchronized with one sheet",
+    "sheet-send|irt-link-failed": "The sheet was sent, but the synchronization for this message could not be enabled. This message will not be updated when the sheet is edited.",
     "sheet-send|sync-only-guild": "Synchronization can only be used in servers. The sheet was sent without synchronization.",
     "sheet-send|too-complex": "This sheet is too complex to be displayed on Discord. View the complete sheet on the website: $url$",
     "sheet-send|limited-title": "Limited display on Discord",

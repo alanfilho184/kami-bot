@@ -10,6 +10,8 @@ import { performance } from 'node:perf_hooks';
 
 const DISCORD_EPOCH = 1420070400000;
 
+let lastLastUseErrorAt = 0;
+
 class Interaction {
     app_permissions: Snowflake;
     application_id: Snowflake;
@@ -94,6 +96,8 @@ class Interaction {
     };
     res: Pick<Response, 'json'>;
     private commandStartedAt: number | null = null;
+    /** Verdadeiro depois que a resposta HTTP da interação foi enviada. */
+    private responded = false;
     constructor(interaction: Interaction, res: Response) {
         this.app_permissions = interaction.app_permissions;
         this.application_id = interaction.application_id;
@@ -212,11 +216,30 @@ class Interaction {
             this.language = this.getLanguage();
         }
 
-        UserController.updateLastUseById(user.id);
+        // Métrica de uso: a falha não pode derrubar a interação e também não
+        // pode inundar o logger (o erro se repete em toda interação durante
+        // uma indisponibilidade do banco). Fica registrado uma vez por minuto.
+        UserController.updateLastUseById(user.id).catch(err => {
+            const now = Date.now();
+
+            if (now - lastLastUseErrorAt < 60_000) {
+                return;
+            }
+
+            lastLastUseErrorAt = now;
+            logger.warn(err, { event: 'user.last_use.update_failed' });
+        });
+    }
+
+    /** A resposta HTTP da interação já foi enviada? */
+    hasResponded(): boolean {
+        return this.responded;
     }
 
     async acknowledge(ephemeral?: boolean) {
         if (!this.isAutocomplete()) {
+            this.responded = true;
+
             if (this.data.custom_id && this.data.custom_id.startsWith('$a$')) {
                 await this.res.json({
                     type: InteractionResponseType.DEFERRED_UPDATE_MESSAGE

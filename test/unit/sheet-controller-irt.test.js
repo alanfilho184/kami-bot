@@ -2,14 +2,42 @@
 //
 // pg_advisory_xact_lock() retorna void e o Prisma não desserializa colunas
 // void em $queryRaw (P2010 "Failed to deserialize column of type 'void'").
-// O teste do SQL garante que a função não apareça como coluna de topo.
+// Os testes abaixo travam o formato do SQL e o uso do escopo da transação:
+// o lock precisa ser tomado dentro da transação (tx) e a função de lock não
+// pode aparecer na projeção de topo do SELECT.
 jest.mock('../../src/configs/database', () => require('../mocks/database'));
 
 const db = require('../../src/configs/database').default;
+const tx = require('../../src/configs/database').tx;
 const SheetController = require('../../src/controllers/sheet.controller').default;
 
+/**
+ * Projeção do SELECT de topo, ignorando o que está entre parênteses.
+ *
+ * A função de lock só pode aparecer dentro de uma subquery: se ela vier na
+ * projeção de topo, o Prisma volta a receber uma coluna void.
+ */
+function topLevelSelectList(sql) {
+    const start = sql.toUpperCase().indexOf('SELECT');
+    let depth = 0;
+
+    for (let i = start; i < sql.length; i += 1) {
+        const char = sql[i];
+
+        if (char === '(') {
+            depth += 1;
+        } else if (char === ')') {
+            depth -= 1;
+        } else if (depth === 0 && sql.slice(i, i + 4).toUpperCase() === 'FROM') {
+            return sql.slice(start + 6, i);
+        }
+    }
+
+    return sql.slice(start + 6);
+}
+
 function lastLockQuerySql() {
-    const [strings] = db.$queryRaw.mock.calls[0];
+    const [strings] = tx.$queryRaw.mock.calls[0];
 
     return strings.join('');
 }
@@ -62,7 +90,10 @@ describe('SheetController.createIrtSheetWithLimit', () => {
         await SheetController.createIrtSheetWithLimit(1, 10, 'msg-1', 'channel-1', 3);
 
         expect(db.$transaction).toHaveBeenCalledTimes(1);
-        expect(db.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+        // O lock precisa ser tomado no escopo da transação (tx), e não no
+        // cliente global: fora dela o lock seria liberado na hora.
+        expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+        expect(tx.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
             db.irt_sheets.count.mock.invocationCallOrder[0]
         );
         expect(db.irt_sheets.count.mock.invocationCallOrder[0]).toBeLessThan(
@@ -70,7 +101,7 @@ describe('SheetController.createIrtSheetWithLimit', () => {
         );
     });
 
-    it('não expõe a coluna void de pg_advisory_xact_lock no resultado', async () => {
+    it('não expõe a coluna void de pg_advisory_xact_lock na projeção de topo', async () => {
         db.irt_sheets.count.mockResolvedValue(0);
         db.irt_sheets.create.mockResolvedValue({ id: 1 });
 
@@ -79,7 +110,7 @@ describe('SheetController.createIrtSheetWithLimit', () => {
         const sql = lastLockQuerySql();
 
         expect(sql).toContain('pg_advisory_xact_lock');
-        expect(sql).not.toMatch(/^\s*SELECT\s+pg_advisory_xact_lock\b/);
+        expect(topLevelSelectList(sql)).not.toMatch(/pg_advisory_xact_lock/);
     });
 
     it('mantém o lock por ficha (chave derivada do sheet_id)', async () => {
@@ -88,7 +119,7 @@ describe('SheetController.createIrtSheetWithLimit', () => {
 
         await SheetController.createIrtSheetWithLimit(1, 10, 'msg-1', 'channel-1', 3);
 
-        const [, lockKey] = db.$queryRaw.mock.calls[0];
+        const [, lockKey] = tx.$queryRaw.mock.calls[0];
 
         expect(lockKey).toBe('sheet:irt:10');
     });

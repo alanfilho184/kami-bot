@@ -3,6 +3,7 @@ import { Interaction } from '../../resources/utils/interaction-handler';
 import { localization } from '../../resources/localization';
 import config from '../../configs/config';
 import { ButtonStyle, Routes } from 'discord-api-types/v10';
+import { InteractionResponseFlags } from 'discord-interactions';
 import { Attribute_Type, Command_Category, Section_Type } from '../../types/enums';
 import sheetNameCache from '../../resources/cache/sheet-name.cache';
 import { similaritySearch } from '../../resources/utils/string-similarity';
@@ -605,13 +606,43 @@ export default {
             })) as { id: string; channel_id?: string; webhook_id: string };
             const channelId = msg.channel_id ?? int.channel_id;
 
-            const createResult = await SheetController.createIrtSheetWithLimit(
-                int.kami_user?.id!,
-                sheet.id,
-                msg.id,
-                channelId,
-                irtLimit
-            );
+            let createResult: 'created' | 'limit';
+
+            try {
+                createResult = await SheetController.createIrtSheetWithLimit(
+                    int.kami_user?.id!,
+                    sheet.id,
+                    msg.id,
+                    channelId,
+                    irtLimit
+                );
+            } catch (err) {
+                // A ficha já foi publicada neste ponto. Sem o vínculo, a
+                // mensagem fica sem sincronização e sem botão: o erro sobe
+                // para a rota e vira um aviso genérico por cima do embed. O
+                // usuário é avisado em privado e a ficha continua no canal.
+                logger.error(err, {
+                    event: 'sheet.send.irt_link_failed',
+                    sheet_id: sheet.id,
+                    channel_id: channelId,
+                    msg_id: msg.id
+                });
+
+                await int
+                    .followUp({
+                        content: localization(language, 'sheet-send|irt-link-failed'),
+                        flags: InteractionResponseFlags.EPHEMERAL
+                    })
+                    .catch(noticeError => {
+                        logger.error(noticeError, {
+                            event: 'sheet.send.irt_link_notice_failed',
+                            sheet_id: sheet.id,
+                            msg_id: msg.id
+                        });
+                    });
+
+                return;
+            }
 
             if (createResult === 'limit') {
                 await rest
@@ -626,7 +657,11 @@ export default {
                         }
                     })
                     .catch(err => {
-                        logger.logText('ERROR', `Error updating IRT limit message: ${err}`);
+                        logger.error(err, {
+                            event: 'sheet.send.irt_limit_notice_failed',
+                            sheet_id: sheet.id,
+                            msg_id: msg.id
+                        });
                     });
 
                 return;
@@ -650,7 +685,13 @@ export default {
                     }
                 })
                 .catch(err => {
-                    logger.logText('ERROR', `Error adding deactivate IRT button: ${err}`);
+                    // O vínculo continua válido: a mensagem segue sincronizando
+                    // e o usuário pode desativar a sincronização pelo comando.
+                    logger.error(err, {
+                        event: 'sheet.send.irt_button_failed',
+                        sheet_id: sheet.id,
+                        msg_id: msg.id
+                    });
                 });
         } else {
             await int.reply({

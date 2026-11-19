@@ -137,6 +137,71 @@ describe('/sheet_send', () => {
         );
     });
 
+    it('mantém a ficha publicada e avisa em privado quando o vínculo IRT falha', async () => {
+        const sheet = fakeSheetRow({ id: 10, user_id: 1, attributes: sectionedAttributes });
+        mockDb.sheets.findFirst.mockResolvedValue(sheet);
+        mockDb.sheets.findUnique.mockResolvedValue(sheet);
+        mockDb.irt_sheets.count.mockResolvedValue(0);
+        // Falha no advisory lock (ou em qualquer passo da transação).
+        mockDb.$queryRaw.mockRejectedValue(new Error('banco indisponível'));
+
+        const res = await postCommandAndWaitReply(
+            app,
+            buildCommandInteraction({
+                name: 'sheet_send',
+                options: [
+                    { name: 'sheet_name', type: 3, value: 'Test Sheet' },
+                    { name: 'options', type: 3, value: 'sync' }
+                ]
+            })
+        );
+
+        expect(res.status).toBe(200);
+
+        // A ficha continua no canal: o erro não substitui o embed.
+        const body = lastWebhookBody(mockRest);
+        expect(body.embeds?.length).toBeGreaterThan(0);
+        expect(body.content).toBeUndefined();
+
+        // Nenhum vínculo foi criado e o aviso é privado.
+        expect(mockDb.irt_sheets.create).not.toHaveBeenCalled();
+        expect(mockRest.post).toHaveBeenCalled();
+
+        const [, followUp] = mockRest.post.mock.calls[mockRest.post.mock.calls.length - 1];
+        expect(followUp.body.flags).toBe(64);
+        expect(followUp.body.content).toContain('sincronização');
+    });
+
+    it('mantém o vínculo quando o botão de desativar falha', async () => {
+        const sheet = fakeSheetRow({ id: 10, user_id: 1, attributes: sectionedAttributes });
+        mockDb.sheets.findFirst.mockResolvedValue(sheet);
+        mockDb.sheets.findUnique.mockResolvedValue(sheet);
+        mockDb.irt_sheets.count.mockResolvedValue(0);
+
+        // O PATCH do botão (canal) falha; o publish (webhook) continua ok.
+        mockRest.patch.mockImplementation(async (url, options) => {
+            if (String(url).includes('/channels/')) {
+                throw new Error('discord fora');
+            }
+
+            return { id: '999999999999999999' };
+        });
+
+        await postCommandAndWaitReply(
+            app,
+            buildCommandInteraction({
+                name: 'sheet_send',
+                options: [
+                    { name: 'sheet_name', type: 3, value: 'Test Sheet' },
+                    { name: 'options', type: 3, value: 'sync' }
+                ]
+            })
+        );
+
+        // A sincronização continua valendo mesmo sem o botão.
+        expect(mockDb.irt_sheets.create).toHaveBeenCalled();
+    });
+
     it('bloqueia sync em DM e envia a ficha sem sincronização', async () => {
         mockDb.sheets.findFirst.mockResolvedValue(
             fakeSheetRow({ id: 10, user_id: 1, attributes: sectionedAttributes })

@@ -7,6 +7,8 @@ interface QueuedEvent {
     size: number;
 }
 
+const DEFAULT_RECONNECT_WATCHDOG_MS = 60_000;
+
 function sleep(milliseconds: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, milliseconds));
 }
@@ -38,11 +40,13 @@ export function createLoggerClient(options: LoggerClientOptions): LoggerClient {
 
     const maxQueue = options.maxQueue ?? 1000;
     const maxQueueBytes = options.maxQueueBytes ?? 1024 * 1024;
+    const reconnectWatchdogMs = options.reconnectWatchdogMs ?? DEFAULT_RECONNECT_WATCHDOG_MS;
     const queue: QueuedEvent[] = [];
 
     let connected = false;
     let closed = false;
     let queueBytes = 0;
+    let watchdogTimer: ReturnType<typeof setTimeout> | null = null;
 
     function trimQueue(): void {
         while (queue.length > maxQueue || queueBytes > maxQueueBytes) {
@@ -58,6 +62,47 @@ export function createLoggerClient(options: LoggerClientOptions): LoggerClient {
 
     function reportError(error: unknown): void {
         options.onError(error instanceof Error ? error : new Error(String(error)));
+    }
+
+    function clearWatchdog(): void {
+        if (!watchdogTimer) {
+            return;
+        }
+
+        clearTimeout(watchdogTimer);
+        watchdogTimer = null;
+    }
+
+    /**
+     * O socket.io-client desiste de vez depois de um connect_error de namespace
+     * (auth do logger) ou de um disconnect enviado pelo servidor: o socket é
+     * destruído e socket.active fica false, mesmo com reconnectionAttempts
+     * Infinity. Este watchdog reabre a conexão nesses casos.
+     */
+    function scheduleWatchdog(): void {
+        if (closed || connected || watchdogTimer) {
+            return;
+        }
+
+        watchdogTimer = setTimeout(() => {
+            watchdogTimer = null;
+
+            if (closed || connected) {
+                return;
+            }
+
+            if (!socket.active) {
+                try {
+                    socket.connect();
+                } catch (error) {
+                    reportError(error);
+                }
+            }
+
+            scheduleWatchdog();
+        }, reconnectWatchdogMs);
+
+        watchdogTimer.unref?.();
     }
 
     function emit(event: IngestEventName, payload: Record<string, unknown>): void {
@@ -83,6 +128,7 @@ export function createLoggerClient(options: LoggerClientOptions): LoggerClient {
 
     socket.on('connect', () => {
         connected = true;
+        clearWatchdog();
         drainQueue();
 
         if (options.onConnect) {
@@ -90,13 +136,21 @@ export function createLoggerClient(options: LoggerClientOptions): LoggerClient {
         }
     });
 
-    socket.on('disconnect', () => {
+    socket.on('disconnect', reason => {
         connected = false;
+
+        // No close() do próprio cliente o motivo é "io client disconnect";
+        // não vale registrar um disconnect operacional nesse caso.
+        if (!closed) {
+            options.onDisconnect?.(reason);
+            scheduleWatchdog();
+        }
     });
 
     socket.on('connect_error', error => {
         connected = false;
         reportError(error);
+        scheduleWatchdog();
     });
 
     function send(event: IngestEventName, payload: Record<string, unknown>): void {
@@ -124,14 +178,8 @@ export function createLoggerClient(options: LoggerClientOptions): LoggerClient {
         // Se o logger caiu e o socket está desconectado, tenta reconectar
         // durante o flush. Sem isso, close() descartava a fila em silêncio.
         if (!connected) {
-            const connect = (socket as unknown as { connect?: () => void }).connect;
-
-            if (typeof connect !== 'function') {
-                return;
-            }
-
             try {
-                connect.call(socket);
+                socket.connect();
             } catch (error) {
                 reportError(error);
                 return;
@@ -162,6 +210,7 @@ export function createLoggerClient(options: LoggerClientOptions): LoggerClient {
         const dropped = queue.length;
 
         closed = true;
+        clearWatchdog();
         connected = false;
         queue.length = 0;
         queueBytes = 0;

@@ -98,4 +98,47 @@ describe('Rota POST /interactions', () => {
         expect(res.status).toBe(401);
         expect(res.body).toEqual({ error: 'Bad request signature' });
     });
+
+    it('responde 200 quando o payload não traz usuário', async () => {
+        // Sem resposta a requisição ficava pendurada e o Discord reentregava
+        // a interação.
+        const interaction = buildCommandInteraction({
+            name: 'roll',
+            options: [{ name: 'dice', type: 3, value: '10' }],
+            inDM: true
+        });
+
+        delete interaction.user;
+
+        const res = await postSignedInteraction(app, interaction);
+
+        expect(res.status).toBe(200);
+        expect(res.body.type).toBe(InteractionResponseType.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE);
+    });
+
+    it('responde 200 para interação vinda de outro bot', async () => {
+        // res.end() sem corpo não é resposta válida: o Discord reentregava.
+        const interaction = buildCommandInteraction({
+            name: 'roll',
+            options: [{ name: 'dice', type: 3, value: '10' }]
+        });
+
+        interaction.member.user.bot = true;
+
+        const res = await postSignedInteraction(app, interaction);
+
+        expect(res.status).toBe(200);
+        expect(res.body.type).toBe(InteractionResponseType.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE);
+    });
+
+    it('responde 200 quando a ação do botão não existe', async () => {
+        // Ação expirada, já usada ou de outro usuário: a interação precisa
+        // de resposta para não ser reentregue.
+        const interaction = buildComponentInteraction({ componentId: '$a$inexistente|abc' });
+
+        const res = await postSignedInteraction(app, interaction);
+
+        expect(res.status).toBe(200);
+        expect(res.body.type).toBe(InteractionResponseType.DEFERRED_UPDATE_MESSAGE);
+    });
 });

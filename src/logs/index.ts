@@ -29,7 +29,8 @@ export interface LogHandlerOptions {
 
 export default class Logger {
     private remote: LoggerClient | null = null;
-    private remoteConnectedLogged = false;
+    private remoteEverConnected = false;
+    private remoteDisconnectedAt: number | null = null;
     private lastRemoteErrorAt = 0;
     private readonly createClient: typeof createLoggerClient;
 
@@ -316,13 +317,30 @@ export default class Logger {
                 instance: config.INSTANCE_NAME,
                 onError: error => this.handleRemoteError(error),
                 onConnect: () => {
-                    if (this.remoteConnectedLogged) {
-                        return;
-                    }
+                    const now = Date.now();
+                    const downtimeMs =
+                        this.remoteDisconnectedAt === null ? 0 : Math.max(0, now - this.remoteDisconnectedAt);
+                    const reconnected = this.remoteEverConnected;
 
-                    this.remoteConnectedLogged = true;
-                    this.writeConsole('INFO', 'Logger remoto conectado', {
-                        event: 'logger.remote.connected'
+                    this.remoteEverConnected = true;
+                    this.remoteDisconnectedAt = null;
+
+                    this.writeConsole(
+                        'INFO',
+                        reconnected
+                            ? `Logger remoto reconectado${downtimeMs > 0 ? ` após ${downtimeMs} ms` : ''}`
+                            : 'Logger remoto conectado',
+                        {
+                            event: reconnected ? 'logger.remote.reconnected' : 'logger.remote.connected',
+                            downtime_ms: reconnected ? downtimeMs : undefined
+                        }
+                    );
+                },
+                onDisconnect: reason => {
+                    this.remoteDisconnectedAt = Date.now();
+                    this.writeConsole('WARN', `Logger remoto desconectado (${reason})`, {
+                        event: 'logger.remote.disconnected',
+                        reason
                     });
                 }
             });

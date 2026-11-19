@@ -54,8 +54,10 @@ export interface LoggerClientOptions {
     instance: string;
     onError: (error: Error) => void;
     onConnect?: () => void;
+    onDisconnect?: (reason: string) => void;
     maxQueue?: number;
     maxQueueBytes?: number;
+    reconnectWatchdogMs?: number;
 }
 
 export interface LoggerClient {

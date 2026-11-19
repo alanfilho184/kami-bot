@@ -29,8 +29,30 @@ const db = {
     $queryRawUnsafe: jest.fn(),
     $executeRaw: jest.fn(),
     $connect: jest.fn(),
-    $transaction: jest.fn(async callback => callback(db))
+    $transaction: jest.fn()
 };
+
+// `tx` é um objeto distinto de `db`: assim o teste garante que o código usa o
+// escopo da transação (tx) e não o cliente global (db). Os acessos delegam
+// para os mesmos spies, então as asserções existentes continuam válidas.
+// Qualquer modelo que o código usar dentro da transação cai no `db`.
+const tx = new Proxy(
+    {
+        $queryRaw: jest.fn((...args) => db.$queryRaw(...args)),
+        $queryRawUnsafe: jest.fn((...args) => db.$queryRawUnsafe(...args)),
+        $executeRaw: jest.fn((...args) => db.$executeRaw(...args)),
+        users: db.users,
+        sheets: db.sheets,
+        irt_sheets: db.irt_sheets
+    },
+    {
+        get(target, property) {
+            return property in target ? target[property] : db[property];
+        }
+    }
+);
+
+db.$transaction.mockImplementation(async callback => callback(tx));
 
 async function verifyConnection() {
     return undefined;
@@ -39,3 +61,4 @@ async function verifyConnection() {
 module.exports = db;
 module.exports.default = db;
 module.exports.verifyConnection = verifyConnection;
+module.exports.tx = tx;

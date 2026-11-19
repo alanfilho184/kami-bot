@@ -30,30 +30,45 @@ class ActionHandler {
         });
     }
 
-    executeAction(id: string, userId: string, ...args: any[]): unknown | void {
+    /**
+     * Executa uma ação registrada.
+     *
+     * `run` é assíncrono: a rejeição precisa ser capturada explicitamente,
+     * senão o `catch` (que só pega throws síncronos) nunca a vê e o erro
+     * escapa sem chegar ao logger estruturado.
+     *
+     * Retorna `false` quando nenhuma ação foi executada (inexistente,
+     * expirada, já usada ou pertencente a outro usuário) para que o chamador
+     * responda a interação e o Discord não a reentregue.
+     */
+    async executeAction(id: string, userId: string, ...args: any[]): Promise<boolean> {
         const action = this.actions.get(id);
 
-        if (action) {
-            if (action.expireAt > new Date()) {
-                try {
-                    if (action.respondOnlyToUserId && action.respondOnlyToUserId !== userId) {
-                        return;
-                    } else {
-                        if (action.singleUse) {
-                            this.deleteAction(id);
-                        }
-
-                        return action.run(...args);
-                    }
-                } catch (err) {
-                    logger.warn(`Error executing action "${id}"`, {
-                        event: 'component.action.error',
-                        action: id,
-                        error: err
-                    });
-                }
-            }
+        if (!action) {
+            return false;
         }
+
+        if (action.expireAt <= new Date()) {
+            this.deleteAction(id);
+            return false;
+        }
+
+        if (action.respondOnlyToUserId && action.respondOnlyToUserId !== userId) {
+            return false;
+        }
+
+        if (action.singleUse) {
+            this.deleteAction(id);
+        }
+
+        try {
+            await action.run(...args);
+        } catch (err) {
+            logger.error(err, { event: 'component.action.error', action: id });
+            throw err;
+        }
+
+        return true;
     }
 
     deleteAction(id: string): void {

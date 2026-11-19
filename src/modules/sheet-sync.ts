@@ -11,6 +11,8 @@ import takeOver from './take-over';
 const RECONCILE_INTERVAL_MS = 30_000;
 const RECONCILE_BATCH_SIZE = 5;
 const CONNECT_ERROR_LOG_INTERVAL_MS = 60_000;
+/** Espera antes de refazer uma desativação que a instância passiva não pode executar. */
+const DEACTIVATE_RETRY_MS = 120_000;
 
 let socket: Socket | null = null;
 let reconcileTimer: NodeJS.Timeout | null = null;
@@ -19,6 +21,7 @@ let reconcileCursor = 0;
 let lastConnectErrorAt = 0;
 const syncingSheets = new Set<number>();
 const dirtySheets = new Set<number>();
+const deactivateRetryTimers = new Set<NodeJS.Timeout>();
 
 interface SheetRealtimeEvent {
     resourceId: number;
@@ -178,6 +181,37 @@ function updateCache(event: SheetRealtimeEvent): void {
     sheetNameCache.upsert(event.userId, event.resourceId, event.name);
 }
 
+/**
+ * Reprova a desativação para mais tarde.
+ *
+ * Uma instância passiva não pode desativar a mensagem (efeito no Discord é
+ *exclusive da instância ativa), mas o evento é único: se a instância ativa
+ * não o tratar, a desativação se perde e o embed antigo fica no canal para
+ * sempre. A retentativa só executa se, lá fora, a instância já for a ativa.
+ */
+function scheduleDeactivateRetry(messages: IrtMessageRef[], sheetId: number): void {
+    const timer = setTimeout(() => {
+        deactivateRetryTimers.delete(timer);
+
+        if (!isActiveInstance()) {
+            logger.info(`IRT deactivation for sheet ${sheetId} was not retried: the instance is still passive`, {
+                event: 'sheet.sync.deactivate_retry_skipped',
+                sheet_id: sheetId,
+                reason: 'passive_instance'
+            });
+
+            return;
+        }
+
+        void deactivateIrtMessages(messages).catch(err => {
+            logger.error(err, { event: 'sheet.sync.deactivate_failed', sheet_id: sheetId });
+        });
+    }, DEACTIVATE_RETRY_MS);
+
+    timer.unref?.();
+    deactivateRetryTimers.add(timer);
+}
+
 function connect(): void {
     if (!config.BOT_SYNC_TOKEN) {
         logger.warn('BOT_SYNC_TOKEN is not configured; IRT realtime sync is disabled', {
@@ -266,11 +300,27 @@ function connect(): void {
 
         const messages = readIrtMessages(event);
 
-        if (messages.length > 0) {
-            void deactivateIrtMessages(messages).catch(err => {
-                logger.error(err, { event: 'sheet.sync.deactivate_failed', sheet_id: event.resourceId });
-            });
+        if (messages.length === 0) {
+            return;
         }
+
+        // Efeitos no Discord vindos de gatilho externo só podem sair da
+        // instância ativa: com primary, secondary e backup no ar, as três
+        // desativariam a mesma mensagem ao mesmo tempo.
+        if (!isActiveInstance()) {
+            logger.info(`Ignoring sheet.deleted deactivation on a passive instance`, {
+                event: 'sheet.sync.event_skipped',
+                sheet_id: event.resourceId,
+                reason: 'passive_instance'
+            });
+
+            scheduleDeactivateRetry(messages, event.resourceId);
+            return;
+        }
+
+        void deactivateIrtMessages(messages).catch(err => {
+            logger.error(err, { event: 'sheet.sync.deactivate_failed', sheet_id: event.resourceId });
+        });
     });
 
     socket.on('user.merged', value => {
@@ -316,6 +366,12 @@ export function stopSheetSync(): void {
         clearInterval(reconcileTimer);
         reconcileTimer = null;
     }
+
+    for (const timer of deactivateRetryTimers) {
+        clearTimeout(timer);
+    }
+
+    deactivateRetryTimers.clear();
 
     socket?.disconnect();
     socket = null;

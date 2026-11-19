@@ -42,6 +42,7 @@
     "sheet-send|description": "Descrição",
     "sheet-send|link": "Clique aqui para ver a ficha no site do Kami",
     "sheet-send|irt-limit-reached": "Limite de sincronizações atingido, só é possível ter até 3 mensagens sincronizadas com uma mesma ficha",
+    "sheet-send|irt-link-failed": "A ficha foi enviada, mas não foi possível ativar a sincronização desta mensagem. Esta mensagem não será atualizada quando a ficha for editada.",
     "sheet-send|sync-only-guild": "A sincronização só pode ser usada em servidores. A ficha foi enviada sem sincronização.",
     "sheet-send|too-complex": "Esta ficha é complexa demais para ser exibida no Discord. Veja a ficha completa no site: $url$",
     "sheet-send|limited-title": "Exibição limitada no Discord",

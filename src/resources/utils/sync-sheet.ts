@@ -70,17 +70,21 @@ async function registerPermanentFailure(irtSheet: Irt_Sheet, sheetId: number): P
         return;
     }
 
+    // O DELETE é condicionado ao contador: se outra instância sincronizou a
+    // mensagem com sucesso entre o UPDATE e aqui, o contador foi zerado e o
+    // vínculo continua válido — remover seria apagar uma sincronização boa.
     const removed = await db.$executeRaw`
         DELETE FROM irt_sheets
         WHERE id = ${irtSheet.id}
+          AND sync_failures >= ${MAX_IRT_SYNC_FAILURES}
     `;
 
     logger.warn(
         removed > 0
             ? `IRT message ${irtSheet.msg_id} (sheet ${sheetId}) was removed after ${failures} consecutive failures.`
-            : `IRT message ${irtSheet.msg_id} (sheet ${sheetId}) reached ${failures} failures but the link no longer existed.`,
+            : `IRT message ${irtSheet.msg_id} (sheet ${sheetId}) reached ${failures} failures but the link was kept (the counter was reset by a successful sync, or the link no longer exists).`,
         {
-            event: removed > 0 ? 'sheet.sync.link_removed' : 'sheet.sync.link_missing',
+            event: removed > 0 ? 'sheet.sync.link_removed' : 'sheet.sync.link_kept',
             sheet_id: sheetId,
             sync_failures: failures
         }
@@ -263,7 +267,20 @@ export default function syncSheet(data: {
             skipped: true
         });
 
-    const next = previous.catch(() => undefined).then(() => withConcurrencySlot(() => syncSheetNow(data)));
+    const next = previous
+        .catch(() => undefined)
+        .then(() => withConcurrencySlot(() => syncSheetNow(data)))
+        .catch(err => {
+            // Rede de segurança: a sincronização nunca pode deixar uma
+            // rejeição solta para o chamador (que a ignora) nem sumir do log.
+            logger.error(err, { event: 'sheet.sync.error', sheet_id: sheetId });
+
+            return {
+                updated: 0,
+                failed: 1,
+                skipped: false
+            };
+        });
 
     sheetQueues.set(sheetId, next);
 

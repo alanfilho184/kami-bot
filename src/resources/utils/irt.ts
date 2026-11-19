@@ -176,6 +176,17 @@ export async function pruneDeadIrtSheets(sheetId: number): Promise<number> {
             await rest.get(messageRoute(`${irtSheet.channel_id}`, `${irtSheet.msg_id}`));
         } catch (err) {
             if (!isMissingIrtMessageError(err)) {
+                // A mensagem existe, mas o bot não conseguiu verificá-la (perda
+                // de permissão, rate limit, instabilidade). O vínculo é mantido e
+                // o motivo fica registrado para diagnóstico.
+                logger.warn(`Could not verify IRT message ${irtSheet.msg_id} (sheet ${sheetId})`, {
+                    event: 'sheet.sync.link_check_failed',
+                    sheet_id: sheetId,
+                    channel_id: String(irtSheet.channel_id),
+                    msg_id: String(irtSheet.msg_id),
+                    error: err
+                });
+
                 continue;
             }
 
